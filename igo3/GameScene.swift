@@ -1,6 +1,12 @@
 import SpriteKit
 import SwiftUI
 
+private enum BossAttackMode {
+    case basic
+    case specialOne
+    case specialTwo
+}
+
 private enum PhysicsCategory {
     static let player: UInt32 = 1 << 0
     static let enemy: UInt32 = 1 << 1
@@ -18,12 +24,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private let world = SKNode()
     private let player = SKShapeNode()
+    private var backgroundTiles: [SKSpriteNode] = []
     private var lastUpdateTime = 0.0
     private var spawnAccumulator = 0.0
     private var shotAccumulator = 0.0
-    private var bossShotAccumulator = 0.0
+    private var bossAttackAccumulator = 0.0
+    private var bossAttackMode: BossAttackMode = .basic
+    private var bossModeElapsed = 0.0
+    private var bossModeDuration = 7.0
+    private var bossWarningUntil = 0.0
     private var boss: SKShapeNode?
     private var bossHP = 0
+    private var bossPhase = 1
+    private var bossInvulnerableUntil = 0.0
     private var didFinish = false
     private var invulnerableUntil = 0.0
 
@@ -38,6 +51,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         physicsWorld.gravity = .zero
         physicsWorld.contactDelegate = self
         addChild(world)
+        createScrollingBackground()
         createStarfield()
         createPlayer()
     }
@@ -87,6 +101,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         spawnAccumulator += delta
         shotAccumulator += delta
 
+        scrollBackground(delta: delta)
         scrollStars(delta: delta)
 
         if boss == nil && session.elapsed >= level.duration {
@@ -103,10 +118,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         if boss != nil {
-            bossShotAccumulator += delta
-            if bossShotAccumulator >= max(0.38, 0.85 - Double(level.id) * 0.07) {
-                bossShotAccumulator = 0
-                fireBossPattern()
+            let isTransitioning = session.elapsed < bossInvulnerableUntil
+            session.bossInvulnerable = isTransitioning
+
+            if !isTransitioning {
+                updateBossAttackMode(delta: delta)
             }
         }
 
@@ -136,7 +152,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func createStarfield() {
-        for index in 0..<80 {
+        for index in 0..<28 {
             let star = SKShapeNode(circleOfRadius: CGFloat.random(in: 0.7...1.8))
             star.fillColor = index.isMultiple(of: 6) ? level.accent.skColor : .white
             star.strokeColor = .clear
@@ -145,6 +161,32 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             star.name = "star"
             star.userData = ["speed": CGFloat.random(in: 28...100)]
             world.addChild(star)
+        }
+    }
+
+    private func createScrollingBackground() {
+        let texture = SKTexture(imageNamed: "Level\(level.id)Background")
+        texture.filteringMode = .linear
+        for index in 0..<2 {
+            let tile = SKSpriteNode(texture: texture)
+            tile.anchorPoint = .zero
+            tile.position = CGPoint(x: 0, y: CGFloat(index) * size.height)
+            tile.size = size
+            tile.zPosition = -20
+            tile.alpha = 0.82
+            tile.name = "background"
+            world.addChild(tile)
+            backgroundTiles.append(tile)
+        }
+    }
+
+    private func scrollBackground(delta: TimeInterval) {
+        let speed = CGFloat(34 + level.id * 5)
+        for tile in backgroundTiles {
+            tile.position.y -= speed * delta
+            if tile.position.y <= -size.height {
+                tile.position.y += size.height * 2
+            }
         }
     }
 
@@ -159,13 +201,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func createPlayer() {
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: 0, y: 27))
-        path.addLine(to: CGPoint(x: -22, y: -20))
-        path.addLine(to: CGPoint(x: 0, y: -10))
-        path.addLine(to: CGPoint(x: 22, y: -20))
-        path.closeSubpath()
-        player.path = path
+        player.path = playerPath()
         player.fillColor = ship.color.skColor
         player.strokeColor = .white
         player.lineWidth = 2
@@ -178,6 +214,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         player.physicsBody?.contactTestBitMask = PhysicsCategory.enemy | PhysicsCategory.enemyShot | PhysicsCategory.pickup
         player.physicsBody?.collisionBitMask = 0
         world.addChild(player)
+
+        let cockpit = SKShapeNode(ellipseOf: CGSize(width: 9, height: 18))
+        cockpit.fillColor = .white.withAlphaComponent(0.9)
+        cockpit.strokeColor = ship.color.skColor
+        cockpit.position = CGPoint(x: 0, y: 4)
+        player.addChild(cockpit)
+    }
+
+    private func playerPath() -> CGPath {
+        switch ship {
+        case .nova:
+            polygon([.init(x: 0, y: 30), .init(x: -10, y: 8), .init(x: -25, y: -18), .init(x: -7, y: -12), .init(x: 0, y: -22), .init(x: 7, y: -12), .init(x: 25, y: -18), .init(x: 10, y: 8)])
+        case .tempest:
+            polygon([.init(x: 0, y: 32), .init(x: -7, y: 12), .init(x: -29, y: -5), .init(x: -18, y: -20), .init(x: 0, y: -12), .init(x: 18, y: -20), .init(x: 29, y: -5), .init(x: 7, y: 12)])
+        case .aegis:
+            polygon([.init(x: 0, y: 29), .init(x: -16, y: 14), .init(x: -25, y: -15), .init(x: -11, y: -24), .init(x: 0, y: -17), .init(x: 11, y: -24), .init(x: 25, y: -15), .init(x: 16, y: 14)])
+        }
     }
 
     private func firePlayerShots() {
@@ -200,7 +253,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func spawnEnemy() {
-        let enemy = SKShapeNode(path: enemyPath())
+        let variant = Int.random(in: 0..<3)
+        let enemy = SKShapeNode(path: enemyPath(variant: variant))
         enemy.name = "enemy"
         enemy.fillColor = level.accent.skColor
         enemy.strokeColor = .white
@@ -229,14 +283,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         enemy.run(.repeat(.sequence([wait, fire]), count: 4))
     }
 
-    private func enemyPath() -> CGPath {
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: 0, y: -20))
-        path.addLine(to: CGPoint(x: -20, y: 15))
-        path.addLine(to: CGPoint(x: 0, y: 8))
-        path.addLine(to: CGPoint(x: 20, y: 15))
-        path.closeSubpath()
-        return path
+    private func enemyPath(variant: Int) -> CGPath {
+        let designs: [[[CGPoint]]] = [
+            [[.init(x: 0, y: -22), .init(x: -22, y: 16), .init(x: -7, y: 10), .init(x: 0, y: 18), .init(x: 7, y: 10), .init(x: 22, y: 16)], [.init(x: 0, y: -23), .init(x: -25, y: 2), .init(x: -12, y: 18), .init(x: 0, y: 9), .init(x: 12, y: 18), .init(x: 25, y: 2)], [.init(x: 0, y: -25), .init(x: -14, y: -5), .init(x: -24, y: 15), .init(x: 0, y: 10), .init(x: 24, y: 15), .init(x: 14, y: -5)]],
+            [[.init(x: 0, y: -24), .init(x: -24, y: -2), .init(x: -18, y: 18), .init(x: 0, y: 8), .init(x: 18, y: 18), .init(x: 24, y: -2)], [.init(x: 0, y: -20), .init(x: -27, y: 12), .init(x: -8, y: 7), .init(x: 0, y: 22), .init(x: 8, y: 7), .init(x: 27, y: 12)], [.init(x: 0, y: -26), .init(x: -18, y: -12), .init(x: -22, y: 16), .init(x: 0, y: 6), .init(x: 22, y: 16), .init(x: 18, y: -12)]],
+            [[.init(x: 0, y: -26), .init(x: -9, y: -7), .init(x: -25, y: 4), .init(x: -14, y: 21), .init(x: 0, y: 10), .init(x: 14, y: 21), .init(x: 25, y: 4), .init(x: 9, y: -7)], [.init(x: 0, y: -23), .init(x: -24, y: -10), .init(x: -17, y: 18), .init(x: 0, y: 13), .init(x: 17, y: 18), .init(x: 24, y: -10)], [.init(x: 0, y: -27), .init(x: -14, y: -12), .init(x: -27, y: 15), .init(x: -6, y: 9), .init(x: 0, y: 21), .init(x: 6, y: 9), .init(x: 27, y: 15), .init(x: 14, y: -12)]],
+            [[.init(x: 0, y: -24), .init(x: -20, y: -8), .init(x: -27, y: 13), .init(x: -8, y: 8), .init(x: 0, y: 20), .init(x: 8, y: 8), .init(x: 27, y: 13), .init(x: 20, y: -8)], [.init(x: 0, y: -27), .init(x: -12, y: -4), .init(x: -24, y: 8), .init(x: -15, y: 22), .init(x: 0, y: 12), .init(x: 15, y: 22), .init(x: 24, y: 8), .init(x: 12, y: -4)], [.init(x: 0, y: -23), .init(x: -25, y: -14), .init(x: -19, y: 16), .init(x: 0, y: 7), .init(x: 19, y: 16), .init(x: 25, y: -14)]],
+            [[.init(x: 0, y: -28), .init(x: -10, y: -8), .init(x: -28, y: 3), .init(x: -17, y: 20), .init(x: 0, y: 11), .init(x: 17, y: 20), .init(x: 28, y: 3), .init(x: 10, y: -8)], [.init(x: 0, y: -25), .init(x: -27, y: -3), .init(x: -20, y: 20), .init(x: 0, y: 8), .init(x: 20, y: 20), .init(x: 27, y: -3)], [.init(x: 0, y: -29), .init(x: -16, y: -12), .init(x: -30, y: 14), .init(x: -7, y: 8), .init(x: 0, y: 23), .init(x: 7, y: 8), .init(x: 30, y: 14), .init(x: 16, y: -12)]]
+        ]
+        return polygon(designs[level.id - 1][variant])
     }
 
     private func fireEnemyShot(from start: CGPoint, toward target: CGPoint) {
@@ -261,7 +316,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func spawnBoss() {
-        let shape = SKShapeNode(rectOf: CGSize(width: 126, height: 70), cornerRadius: 24)
+        let shape = SKShapeNode(path: bossPath())
         shape.name = "boss"
         shape.fillColor = level.accent.skColor
         shape.strokeColor = .white
@@ -270,6 +325,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         shape.position = CGPoint(x: size.width / 2, y: size.height + 70)
         shape.zPosition = 9
         bossHP = level.bossHealth
+        bossPhase = 1
+        bossAttackMode = .basic
+        bossAttackAccumulator = 0
+        bossModeElapsed = 0
+        bossModeDuration = Double.random(in: 5...10)
+        bossWarningUntil = 0
+        bossInvulnerableUntil = 0
+        session.bossPhase = 1
+        session.bossInvulnerable = false
         shape.userData = ["hp": bossHP]
         shape.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 116, height: 60))
         shape.physicsBody?.categoryBitMask = PhysicsCategory.enemy
@@ -281,6 +345,26 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         session.bossHealth = bossHP
         session.bossVisible = true
         shape.run(.move(to: CGPoint(x: size.width / 2, y: size.height - 130), duration: 1.2))
+    }
+
+    private func bossPath() -> CGPath {
+        let designs: [[CGPoint]] = [
+            [.init(x: 0, y: -42), .init(x: -28, y: -20), .init(x: -70, y: -30), .init(x: -58, y: 18), .init(x: -25, y: 34), .init(x: 0, y: 25), .init(x: 25, y: 34), .init(x: 58, y: 18), .init(x: 70, y: -30), .init(x: 28, y: -20)],
+            [.init(x: 0, y: -45), .init(x: -18, y: -22), .init(x: -72, y: -12), .init(x: -55, y: 34), .init(x: -20, y: 22), .init(x: 0, y: 40), .init(x: 20, y: 22), .init(x: 55, y: 34), .init(x: 72, y: -12), .init(x: 18, y: -22)],
+            [.init(x: 0, y: -48), .init(x: -22, y: -20), .init(x: -68, y: -34), .init(x: -62, y: 20), .init(x: -32, y: 38), .init(x: 0, y: 27), .init(x: 32, y: 38), .init(x: 62, y: 20), .init(x: 68, y: -34), .init(x: 22, y: -20)],
+            [.init(x: 0, y: -44), .init(x: -35, y: -28), .init(x: -74, y: 0), .init(x: -48, y: 42), .init(x: 0, y: 29), .init(x: 48, y: 42), .init(x: 74, y: 0), .init(x: 35, y: -28)],
+            [.init(x: 0, y: -50), .init(x: -20, y: -25), .init(x: -76, y: -20), .init(x: -66, y: 28), .init(x: -30, y: 44), .init(x: 0, y: 31), .init(x: 30, y: 44), .init(x: 66, y: 28), .init(x: 76, y: -20), .init(x: 20, y: -25)]
+        ]
+        return polygon(designs[level.id - 1])
+    }
+
+    private func polygon(_ points: [CGPoint]) -> CGPath {
+        let path = CGMutablePath()
+        guard let first = points.first else { return path }
+        path.move(to: first)
+        points.dropFirst().forEach { path.addLine(to: $0) }
+        path.closeSubpath()
+        return path
     }
 
     private func fireBossPattern() {
@@ -295,13 +379,487 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         boss.run(movement)
     }
 
+    private func updateBossAttackMode(delta: TimeInterval) {
+        bossModeElapsed += delta
+
+        if bossModeElapsed >= bossModeDuration {
+            switchBossAttackMode()
+            return
+        }
+
+        guard session.elapsed >= bossWarningUntil else { return }
+        bossAttackAccumulator += delta
+
+        let interval: TimeInterval
+        switch bossAttackMode {
+        case .basic:
+            interval = max(0.38, 0.86 - Double(level.id) * 0.06 - Double(bossPhase - 1) * 0.05)
+        case .specialOne, .specialTwo:
+            interval = max(1.8, 2.8 - Double(bossPhase - 1) * 0.25)
+        }
+
+        guard bossAttackAccumulator >= interval else { return }
+        bossAttackAccumulator = 0
+
+        switch bossAttackMode {
+        case .basic:
+            fireBossPattern()
+        case .specialOne:
+            fireBossSpecial()
+        case .specialTwo:
+            fireBossAlternateSpecial()
+        }
+    }
+
+    private func switchBossAttackMode() {
+        bossModeElapsed = 0
+        bossModeDuration = Double.random(in: 5...10)
+        bossAttackAccumulator = 0
+
+        switch bossAttackMode {
+        case .basic:
+            bossAttackMode = Bool.random() ? .specialOne : .specialTwo
+            bossWarningUntil = session.elapsed + 1.0
+            showBossWarning(bossAttackMode == .specialOne ? specialName : alternateSpecialName)
+        case .specialOne, .specialTwo:
+            bossAttackMode = .basic
+            bossWarningUntil = session.elapsed
+        }
+    }
+
+    private func fireBossSpecial() {
+        guard let boss else { return }
+
+        switch level.id {
+        case 1:
+            fireSpiralNova(from: boss.position)
+        case 2:
+            fireCrimsonLanes(from: boss.position)
+        case 3:
+            fireThunderCage(from: boss.position)
+        case 4:
+            deployVoidMines(from: boss.position)
+        default:
+            fireDoomsdayBarrage(from: boss.position)
+        }
+    }
+
+    private var specialName: String {
+        switch level.id {
+        case 1: "星旋爆發"
+        case 2: "緋紅封鎖"
+        case 3: "雷霆牢籠"
+        case 4: "虛空追獵"
+        default: "終焉裁決"
+        }
+    }
+
+    private var alternateSpecialName: String {
+        switch level.id {
+        case 1: "彗星追擊"
+        case 2: "赤焰交叉"
+        case 3: "天雷降臨"
+        case 4: "暗影飛彈"
+        default: "滅世星環"
+        }
+    }
+
+    private func fireBossAlternateSpecial() {
+        guard let boss else { return }
+
+        switch level.id {
+        case 1:
+            fireAimedBurst(from: boss.position, color: .systemTeal, count: 7)
+        case 2:
+            fireCrimsonCrossfire(from: boss.position)
+        case 3:
+            fireLightningRain()
+        case 4:
+            fireHomingSwarm(from: boss.position)
+        default:
+            fireDoomsdayRing(from: boss.position)
+        }
+    }
+
+    private func fireAimedBurst(from origin: CGPoint, color: SKColor, count: Int) {
+        let baseAngle = atan2(player.position.y - origin.y, player.position.x - origin.x)
+        for index in 0..<count {
+            let spread = (CGFloat(index) - CGFloat(count - 1) / 2) * 0.09
+            let angle = baseAngle + spread
+            let target = CGPoint(x: origin.x + cos(angle) * 700, y: origin.y + sin(angle) * 700)
+            spawnHostileProjectile(from: origin, toward: target, duration: 2.3, radius: 6, color: color)
+        }
+    }
+
+    private func fireCrimsonCrossfire(from origin: CGPoint) {
+        let rowCount = 5 + bossPhase
+        for index in 0..<rowCount {
+            let y = 130 + CGFloat(index) * 82
+            let leftTarget = CGPoint(x: size.width + 40, y: y + 100)
+            let rightTarget = CGPoint(x: -40, y: y - 100)
+            spawnHostileProjectile(
+                from: CGPoint(x: -20, y: y),
+                toward: leftTarget,
+                duration: 3.0,
+                radius: 7,
+                color: .systemRed
+            )
+            spawnHostileProjectile(
+                from: CGPoint(x: size.width + 20, y: y),
+                toward: rightTarget,
+                duration: 3.0,
+                radius: 7,
+                color: .systemOrange
+            )
+        }
+        fireAimedBurst(from: origin, color: .systemRed, count: 3 + bossPhase)
+    }
+
+    private func fireLightningRain() {
+        let columns = 6 + bossPhase
+        let safeColumn = Int.random(in: 0..<columns)
+        for column in 0..<columns where column != safeColumn {
+            let x = (CGFloat(column) + 0.5) * size.width / CGFloat(columns)
+            spawnHostileProjectile(
+                from: CGPoint(x: x, y: size.height + 20),
+                toward: CGPoint(x: x + CGFloat.random(in: -35...35), y: -40),
+                duration: 1.8,
+                radius: 7,
+                color: .systemBlue
+            )
+        }
+    }
+
+    private func fireHomingSwarm(from origin: CGPoint) {
+        let count = 5 + bossPhase
+        for index in 0..<count {
+            run(.sequence([
+                .wait(forDuration: Double(index) * 0.12),
+                .run { [weak self] in
+                    guard let self else { return }
+                    self.fireAimedBurst(from: origin, color: .systemGreen, count: 1)
+                }
+            ]))
+        }
+    }
+
+    private func fireDoomsdayRing(from origin: CGPoint) {
+        let count = 20 + bossPhase * 4
+        let openingAngle = atan2(player.position.y - origin.y, player.position.x - origin.x)
+        for index in 0..<count {
+            let angle = CGFloat(index) / CGFloat(count) * .pi * 2
+            let difference = abs(atan2(sin(angle - openingAngle), cos(angle - openingAngle)))
+            guard difference > 0.22 else { continue }
+            let target = CGPoint(x: origin.x + cos(angle) * 720, y: origin.y + sin(angle) * 720)
+            spawnHostileProjectile(from: origin, toward: target, duration: 3.2, radius: 7, color: .systemYellow)
+        }
+    }
+
+    private func fireSpiralNova(from origin: CGPoint) {
+        let count = 18 + bossPhase * 4
+        for index in 0..<count {
+            let angle = CGFloat(index) / CGFloat(count) * .pi * 2 + CGFloat(bossPhase) * 0.2
+            let target = CGPoint(x: origin.x + cos(angle) * 700, y: origin.y + sin(angle) * 700)
+            spawnHostileProjectile(from: origin, toward: target, duration: 3.8, radius: 5, color: .cyan)
+        }
+    }
+
+    private func fireCrimsonLanes(from origin: CGPoint) {
+        let laneCount = 3 + bossPhase
+        let gap = Int.random(in: 0..<laneCount)
+        for lane in 0..<laneCount where lane != gap {
+            let x = (CGFloat(lane) + 0.5) * size.width / CGFloat(laneCount)
+            let warning = SKShapeNode(rectOf: CGSize(width: 22, height: size.height))
+            warning.fillColor = .systemRed.withAlphaComponent(0.16)
+            warning.strokeColor = .systemRed
+            warning.position = CGPoint(x: x, y: size.height / 2)
+            warning.zPosition = 10
+            world.addChild(warning)
+            warning.run(.sequence([
+                .wait(forDuration: 0.65),
+                .run { [weak self] in
+                    guard let self else { return }
+                    for offset in 0..<9 {
+                        let start = CGPoint(x: x, y: self.size.height + CGFloat(offset) * 32)
+                        self.spawnHostileProjectile(
+                            from: start,
+                            toward: CGPoint(x: x, y: -40),
+                            duration: 2.0,
+                            radius: 8,
+                            color: .systemRed
+                        )
+                    }
+                },
+                .fadeOut(withDuration: 0.15),
+                .removeFromParent()
+            ]))
+        }
+        fireEnemyShot(from: origin, toward: player.position)
+    }
+
+    private func fireThunderCage(from origin: CGPoint) {
+        let rows = 4 + bossPhase
+        for index in 0..<rows {
+            let y = 145 + CGFloat(index) * 72
+            spawnHostileProjectile(
+                from: CGPoint(x: -20, y: y),
+                toward: CGPoint(x: size.width + 30, y: y + CGFloat.random(in: -30...30)),
+                duration: 3.3,
+                radius: 6,
+                color: .systemPurple
+            )
+            spawnHostileProjectile(
+                from: CGPoint(x: size.width + 20, y: y + 34),
+                toward: CGPoint(x: -30, y: y + CGFloat.random(in: -30...30)),
+                duration: 3.3,
+                radius: 6,
+                color: .systemBlue
+            )
+        }
+        for delayIndex in 0..<(2 + bossPhase) {
+            run(.sequence([
+                .wait(forDuration: Double(delayIndex) * 0.32),
+                .run { [weak self] in
+                    guard let self else { return }
+                    self.fireEnemyShot(from: origin, toward: self.player.position)
+                }
+            ]))
+        }
+    }
+
+    private func deployVoidMines(from origin: CGPoint) {
+        let mineCount = 4 + bossPhase
+        for index in 0..<mineCount {
+            let mine = makeHostileProjectile(radius: 11, color: .systemGreen)
+            mine.position = origin
+            mine.setScale(0.35)
+            world.addChild(mine)
+            let destination = CGPoint(
+                x: (CGFloat(index) + 0.5) * size.width / CGFloat(mineCount),
+                y: CGFloat.random(in: 260...620)
+            )
+            mine.run(.sequence([
+                .group([
+                    .move(to: destination, duration: 0.7),
+                    .scale(to: 1, duration: 0.7)
+                ]),
+                .wait(forDuration: 0.7),
+                .run { [weak self, weak mine] in
+                    guard let self, let mine, mine.parent != nil else { return }
+                    let target = self.player.position
+                    let vector = CGVector(dx: target.x - mine.position.x, dy: target.y - mine.position.y)
+                    let length = max(1, hypot(vector.dx, vector.dy))
+                    let end = CGPoint(
+                        x: mine.position.x + vector.dx / length * self.size.height,
+                        y: mine.position.y + vector.dy / length * self.size.height
+                    )
+                    mine.run(.sequence([.move(to: end, duration: 2.0), .removeFromParent()]))
+                }
+            ]))
+        }
+    }
+
+    private func fireDoomsdayBarrage(from origin: CGPoint) {
+        let waves = 3 + bossPhase
+        for wave in 0..<waves {
+            run(.sequence([
+                .wait(forDuration: Double(wave) * 0.24),
+                .run { [weak self] in
+                    guard let self else { return }
+                    let count = 13
+                    let sweepOffset = CGFloat(wave % 2) * 0.16
+                    for index in 0..<count {
+                        let angle = .pi * (0.18 + sweepOffset + CGFloat(index) / CGFloat(count - 1) * 0.64)
+                        let target = CGPoint(x: origin.x + cos(angle) * 650, y: origin.y - sin(angle) * 850)
+                        self.spawnHostileProjectile(
+                            from: origin,
+                            toward: target,
+                            duration: 2.7,
+                            radius: 6,
+                            color: wave.isMultiple(of: 2) ? .systemYellow : .systemPink
+                        )
+                    }
+                }
+            ]))
+        }
+    }
+
+    private func spawnHostileProjectile(
+        from start: CGPoint,
+        toward target: CGPoint,
+        duration: TimeInterval,
+        radius: CGFloat,
+        color: SKColor
+    ) {
+        let shot = makeHostileProjectile(radius: radius, color: color)
+        shot.position = start
+        world.addChild(shot)
+        let vector = CGVector(dx: target.x - start.x, dy: target.y - start.y)
+        let length = max(1, hypot(vector.dx, vector.dy))
+        let distance = size.height * 1.5
+        let end = CGPoint(x: start.x + vector.dx / length * distance, y: start.y + vector.dy / length * distance)
+        shot.run(.sequence([.move(to: end, duration: duration), .removeFromParent()]))
+    }
+
+    private func makeHostileProjectile(radius: CGFloat, color: SKColor) -> SKShapeNode {
+        let shot = SKShapeNode(circleOfRadius: radius)
+        shot.name = "enemyShot"
+        shot.fillColor = color
+        shot.strokeColor = .white
+        shot.glowWidth = radius
+        shot.zPosition = 7
+        shot.physicsBody = SKPhysicsBody(circleOfRadius: radius)
+        shot.physicsBody?.categoryBitMask = PhysicsCategory.enemyShot
+        shot.physicsBody?.contactTestBitMask = PhysicsCategory.player
+        shot.physicsBody?.collisionBitMask = 0
+        return shot
+    }
+
+    private func beginBossPhaseTransition(to phase: Int, at threshold: Int) {
+        guard let boss else { return }
+        bossPhase = phase
+        bossHP = threshold
+        boss.userData?["hp"] = threshold
+        session.bossHealth = threshold
+        session.bossPhase = phase
+        session.bossInvulnerable = true
+        bossInvulnerableUntil = session.elapsed + 2.2
+        bossAttackMode = .basic
+        bossAttackAccumulator = 0
+        bossModeElapsed = 0
+        bossModeDuration = Double.random(in: 5...10)
+        bossWarningUntil = bossInvulnerableUntil
+
+        world.children.filter { $0.name == "enemyShot" }.forEach { $0.removeFromParent() }
+        boss.removeAllActions()
+        boss.run(.sequence([
+            .group([
+                .scale(to: 1.18, duration: 0.18),
+                .colorize(with: .white, colorBlendFactor: 0.8, duration: 0.18)
+            ]),
+            .repeat(.sequence([
+                .fadeAlpha(to: 0.35, duration: 0.12),
+                .fadeAlpha(to: 1, duration: 0.12)
+            ]), count: 6),
+            .group([
+                .scale(to: 1, duration: 0.18),
+                .colorize(withColorBlendFactor: 0, duration: 0.18)
+            ])
+        ]))
+
+        let shield = SKShapeNode(circleOfRadius: 92)
+        shield.strokeColor = .white
+        shield.lineWidth = 5
+        shield.glowWidth = 14
+        shield.fillColor = level.accent.skColor.withAlphaComponent(0.14)
+        shield.position = boss.position
+        shield.zPosition = 13
+        world.addChild(shield)
+        shield.run(.sequence([
+            .repeat(.sequence([
+                .scale(to: 1.12, duration: 0.18),
+                .scale(to: 0.95, duration: 0.18)
+            ]), count: 5),
+            .fadeOut(withDuration: 0.15),
+            .removeFromParent()
+        ]))
+
+        showBossCallout("PHASE \(phase)・\(ultimateName) 發動")
+        run(.sequence([
+            .wait(forDuration: 0.65),
+            .run { [weak self] in self?.fireBossUltimate() }
+        ]))
+    }
+
+    private var ultimateName: String {
+        switch level.id {
+        case 1: "星核超新星"
+        case 2: "血色天幕"
+        case 3: "雷神領域"
+        case 4: "虛空吞噬"
+        default: "終焉審判"
+        }
+    }
+
+    private func fireBossUltimate() {
+        fireBossSpecial()
+        run(.sequence([
+            .wait(forDuration: 0.55),
+            .run { [weak self] in self?.fireBossAlternateSpecial() }
+        ]))
+    }
+
+    private func showBossWarning(_ attackName: String) {
+        let panel = SKShapeNode(rectOf: CGSize(width: 230, height: 38), cornerRadius: 12)
+        panel.fillColor = .black.withAlphaComponent(0.72)
+        panel.strokeColor = .systemOrange
+        panel.lineWidth = 2
+        panel.position = CGPoint(x: size.width / 2, y: size.height * 0.67)
+        panel.zPosition = 28
+
+        let label = SKLabelNode(fontNamed: "AvenirNext-DemiBold")
+        label.text = "⚠ 即將發動：\(attackName)"
+        label.fontSize = 15
+        label.fontColor = .systemYellow
+        label.verticalAlignmentMode = .center
+        panel.addChild(label)
+        world.addChild(panel)
+        panel.run(.sequence([
+            .repeat(.sequence([
+                .fadeAlpha(to: 0.35, duration: 0.12),
+                .fadeAlpha(to: 1, duration: 0.12)
+            ]), count: 3),
+            .wait(forDuration: 0.15),
+            .fadeOut(withDuration: 0.15),
+            .removeFromParent()
+        ]))
+    }
+
+    private func showBossCallout(_ text: String) {
+        let label = SKLabelNode(fontNamed: "AvenirNext-Bold")
+        label.text = text
+        label.fontSize = 22
+        label.fontColor = .white
+        label.position = CGPoint(x: size.width / 2, y: size.height * 0.58)
+        label.zPosition = 30
+        world.addChild(label)
+        label.run(.sequence([
+            .group([.fadeIn(withDuration: 0.15), .scale(to: 1.08, duration: 0.15)]),
+            .wait(forDuration: 0.9),
+            .fadeOut(withDuration: 0.25),
+            .removeFromParent()
+        ]))
+    }
+
     private func damage(node: SKNode, amount: Int) {
         guard var hp = node.userData?["hp"] as? Int else { return }
+        let isBoss = node === boss
+
+        if isBoss, session.elapsed < bossInvulnerableUntil {
+            return
+        }
+
         hp -= amount
+
+        if isBoss {
+            let phaseTwoThreshold = level.bossHealth * 2 / 3
+            let phaseThreeThreshold = level.bossHealth / 3
+
+            if bossPhase == 1, hp <= phaseTwoThreshold {
+                beginBossPhaseTransition(to: 2, at: phaseTwoThreshold)
+                return
+            }
+
+            if bossPhase == 2, hp <= phaseThreeThreshold {
+                beginBossPhaseTransition(to: 3, at: phaseThreeThreshold)
+                return
+            }
+        }
+
         node.userData?["hp"] = hp
         node.run(.sequence([.fadeAlpha(to: 0.35, duration: 0.04), .fadeAlpha(to: 1, duration: 0.06)]))
 
-        if node === boss {
+        if isBoss {
             bossHP = hp
             session.bossHealth = max(0, hp)
         }
@@ -309,10 +867,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if hp <= 0 {
             explode(at: node.position, color: (node as? SKShapeNode)?.fillColor ?? .white)
             node.removeFromParent()
-            session.score += node === boss ? level.id * 2_000 : 100 * level.id
-            session.energy = min(1, session.energy + (node === boss ? 0.3 : 0.06))
-            if node === boss {
+            session.score += isBoss ? level.id * 2_000 : 100 * level.id
+            session.energy = min(1, session.energy + (isBoss ? 0.3 : 0.06))
+            if isBoss {
                 boss = nil
+                session.bossInvulnerable = false
                 endBattle(victory: true)
             } else if Int.random(in: 0..<5) == 0 {
                 spawnPickup(at: node.position)
@@ -380,6 +939,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
 private extension Color {
     var skColor: SKColor {
-        SKColor(cgColor: resolve(in: EnvironmentValues()).cgColor) ?? .white
+        SKColor(cgColor: resolve(in: EnvironmentValues()).cgColor)
     }
 }

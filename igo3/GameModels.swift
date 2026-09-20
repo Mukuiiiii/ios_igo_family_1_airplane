@@ -67,11 +67,11 @@ struct LevelDefinition: Identifiable, Equatable {
     let bossHealth: Int
 
     static let all: [LevelDefinition] = [
-        .init(id: 1, title: "星海啟程", sector: "蔚藍星域", accent: .cyan, duration: 42, enemyRate: 1.20, bossHealth: 70),
-        .init(id: 2, title: "赤色警戒", sector: "緋紅星雲", accent: .red, duration: 48, enemyRate: 1.05, bossHealth: 95),
-        .init(id: 3, title: "雷霆邊界", sector: "紫電禁區", accent: .purple, duration: 54, enemyRate: 0.92, bossHealth: 125),
-        .init(id: 4, title: "虛空裂隙", sector: "翡翠深空", accent: .green, duration: 60, enemyRate: 0.80, bossHealth: 160),
-        .init(id: 5, title: "終焉要塞", sector: "黃金核心", accent: .yellow, duration: 66, enemyRate: 0.68, bossHealth: 210)
+        .init(id: 1, title: "星海啟程", sector: "蔚藍星域", accent: .cyan, duration: 42, enemyRate: 1.20, bossHealth: 4_000),
+        .init(id: 2, title: "赤色警戒", sector: "緋紅星雲", accent: .red, duration: 48, enemyRate: 1.05, bossHealth: 4_500),
+        .init(id: 3, title: "雷霆邊界", sector: "紫電禁區", accent: .purple, duration: 54, enemyRate: 0.92, bossHealth: 5_000),
+        .init(id: 4, title: "虛空裂隙", sector: "翡翠深空", accent: .green, duration: 60, enemyRate: 0.80, bossHealth: 5_500),
+        .init(id: 5, title: "終焉要塞", sector: "黃金核心", accent: .yellow, duration: 66, enemyRate: 0.68, bossHealth: 6_000)
     ]
 }
 
@@ -106,6 +106,8 @@ final class GameSession {
     var bossHealth = 0
     var bossMaxHealth = 0
     var bossVisible = false
+    var bossPhase = 1
+    var bossInvulnerable = false
     var elapsed = 0.0
     var state: BattleState = .playing
     var earnedCoins = 0

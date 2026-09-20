@@ -537,11 +537,22 @@ struct BattleHUD: View {
 
             if session.bossVisible {
                 VStack(spacing: 4) {
-                    Text("警告・敵方旗艦")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.red)
+                    HStack {
+                        Text("警告・敵方旗艦")
+                        Spacer()
+                        Text("PHASE \(session.bossPhase)")
+                    }
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(session.bossInvulnerable ? .cyan : .red)
+
                     ProgressView(value: Double(session.bossHealth), total: Double(max(1, session.bossMaxHealth)))
-                        .tint(.red)
+                        .tint(session.bossInvulnerable ? .cyan : .red)
+
+                    if session.bossInvulnerable {
+                        Label("階段轉換・無敵護盾", systemImage: "shield.fill")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.cyan)
+                    }
                 }
             }
         }
