@@ -6,8 +6,14 @@
 	objectVersion = 90;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		59FDB0FF30603A2100173727 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 59FDB0FE30603A2100173727 /* README.md */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* igo3.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = igo3.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		59FDB0F7306039E700173727 /* igo3Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = igo3Tests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		59FDB0FE30603A2100173727 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,10 +22,20 @@
 			path = igo3;
 			sourceTree = "<group>";
 		};
+		59FDB0F8306039E700173727 /* igo3Tests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = igo3Tests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		000000000000000130000000 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+		59FDB0F4306039E700173727 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
 			);
@@ -31,6 +47,8 @@
 			isa = PBXGroup;
 			children = (
 				000000000000000000000010 /* igo3 */,
+				59FDB0F8306039E700173727 /* igo3Tests */,
+				59FDB0FE30603A2100173727 /* README.md */,
 				000000000000000000000020 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -39,6 +57,7 @@
 			isa = PBXGroup;
 			children = (
 				000000000000000000000120 /* igo3.app */,
+				59FDB0F7306039E700173727 /* igo3Tests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -64,6 +83,24 @@
 			productReference = 000000000000000000000120 /* igo3.app */;
 			productType = "com.apple.product-type.application";
 		};
+		59FDB0F6306039E700173727 /* igo3Tests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 59FDB0FB306039E700173727 /* Build configuration list for PBXNativeTarget "igo3Tests" */;
+			buildPhases = (
+				59FDB0F3306039E700173727 /* Sources */,
+				59FDB0F4306039E700173727 /* Frameworks */,
+				59FDB0F5306039E700173727 /* Resources */,
+			);
+			buildRules = (
+			);
+			fileSystemSynchronizedGroups = (
+				59FDB0F8306039E700173727 /* igo3Tests */,
+			);
+			name = igo3Tests;
+			productName = igo3Tests;
+			productReference = 59FDB0F7306039E700173727 /* igo3Tests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -71,11 +108,14 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2630;
+				LastSwiftUpdateCheck = 2700;
 				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					000000000000000100000000 = {
 						CreatedOnToolsVersion = 26.3;
+					};
+					59FDB0F6306039E700173727 = {
+						CreatedOnToolsVersion = 27.0;
 					};
 				};
 			};
@@ -94,6 +134,7 @@
 			projectRoot = "";
 			targets = (
 				000000000000000100000000 /* igo3 */,
+				59FDB0F6306039E700173727 /* igo3Tests */,
 			);
 		};
 /* End PBXProject section */
@@ -102,12 +143,23 @@
 		000000000000000140000000 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
+				59FDB0FF30603A2100173727 /* README.md in Resources */,
+			);
+		};
+		59FDB0F5306039E700173727 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
 			);
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		000000000000000120000000 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		59FDB0F3306039E700173727 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
 			);
@@ -321,6 +373,56 @@
 			};
 			name = Release;
 		};
+		59FDB0FC306039E700173727 /* Debug configuration for PBXNativeTarget "igo3Tests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(BUILT_PRODUCTS_DIR)/igo3.app/igo3.debug.dylib";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.yourcompany.igo3Tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/igo3.app/igo3";
+				XROS_DEPLOYMENT_TARGET = 27.0;
+			};
+			name = Debug;
+		};
+		59FDB0FD306039E700173727 /* Release configuration for PBXNativeTarget "igo3Tests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(BUILT_PRODUCTS_DIR)/igo3.app/igo3.debug.dylib";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.yourcompany.igo3Tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/igo3.app/igo3";
+				XROS_DEPLOYMENT_TARGET = 27.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -337,6 +439,14 @@
 			buildConfigurations = (
 				000000000000000111000000 /* Debug configuration for PBXNativeTarget "igo3" */,
 				000000000000000112000000 /* Release configuration for PBXNativeTarget "igo3" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		59FDB0FB306039E700173727 /* Build configuration list for PBXNativeTarget "igo3Tests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				59FDB0FC306039E700173727 /* Debug configuration for PBXNativeTarget "igo3Tests" */,
+				59FDB0FD306039E700173727 /* Release configuration for PBXNativeTarget "igo3Tests" */,
 			);
 			defaultConfigurationName = Release;
 		};

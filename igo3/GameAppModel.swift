@@ -11,15 +11,13 @@ final class GameAppModel {
     var session: GameSession?
     var activeScene: GameScene?
 
-    private let saveKey = "stellarStrike.progress.v1"
+    private let store: UserDefaults
+    private let saveKey: String
 
-    init() {
-        if let data = UserDefaults.standard.data(forKey: saveKey),
-           let decoded = try? JSONDecoder().decode(GameProgress.self, from: data) {
-            progress = decoded
-        } else {
-            progress = GameProgress()
-        }
+    init(store: UserDefaults = .standard, saveKey: String = "stellarStrike.progress.v1") {
+        self.store = store
+        self.saveKey = saveKey
+        progress = Self.loadProgress(from: store, key: saveKey)
     }
 
     var selectedShip: ShipID { progress.selectedShip }
@@ -72,21 +70,56 @@ final class GameAppModel {
             upgradeLevel: upgrade,
             session: battle
         )
-        scene.scaleMode = .aspectFill
+        scene.scaleMode = .aspectFit
         activeScene = scene
         screen = .game
     }
 
-    func finishBattle(victory: Bool) {
-        guard let session else { return }
-        let baseReward = victory ? selectedLevel * 120 : max(20, session.score / 40)
-        session.earnedCoins = baseReward
-        progress.coins += baseReward
-        progress.highScores[selectedLevel] = max(progress.highScores[selectedLevel, default: 0], session.score)
-        if victory {
-            progress.highestUnlockedLevel = min(5, max(progress.highestUnlockedLevel, selectedLevel + 1))
+    @discardableResult
+    func settleCurrentBattle() -> BattleSettlement? {
+        guard let session, let outcome = session.claimOutcome(),
+              let definition = LevelDefinition.all.first(where: { $0.id == outcome.level }) else {
+            return nil
         }
+
+        let previousBest = progress.highScores[outcome.level, default: 0]
+        let isPersonalBest = outcome.score > previousBest
+        let isFirstClear = outcome.victory && !progress.clearedLevels.contains(outcome.level)
+        let stars = definition.stars(
+            victory: outcome.victory,
+            score: outcome.score,
+            hitsTaken: outcome.hitsTaken
+        )
+        let battleReward = outcome.victory ? outcome.level * 120 : max(20, outcome.score / 40)
+        let firstClearBonus = isFirstClear ? outcome.level * 200 : 0
+        let earnedCoins = battleReward + firstClearBonus
+        let settlement = BattleSettlement(
+            outcome: outcome,
+            stars: stars,
+            earnedCoins: earnedCoins,
+            isFirstClear: isFirstClear,
+            isPersonalBest: isPersonalBest
+        )
+
+        progress.coins += earnedCoins
+        progress.highScores[outcome.level] = max(previousBest, outcome.score)
+        progress.bestStars[outcome.level] = max(progress.bestStars[outcome.level, default: 0], stars)
+        if outcome.victory {
+            progress.clearedLevels.insert(outcome.level)
+            progress.highestUnlockedLevel = min(5, max(progress.highestUnlockedLevel, outcome.level + 1))
+        }
+        session.applySettlement(settlement)
         save()
+        return settlement
+    }
+
+    func startNextLevel() {
+        let next = min(5, selectedLevel + 1)
+        guard next != selectedLevel, next <= progress.highestUnlockedLevel else {
+            leaveBattle()
+            return
+        }
+        start(level: next)
     }
 
     func leaveBattle() {
@@ -111,8 +144,46 @@ final class GameAppModel {
         save()
     }
 
+    func setControlSensitivity(_ value: Double) {
+        progress.controlSensitivity = value
+        save()
+    }
+
+    func setFingerOffset(_ value: Double) {
+        progress.fingerOffset = value
+        save()
+    }
+
     private func save() {
         guard let data = try? JSONEncoder().encode(progress) else { return }
-        UserDefaults.standard.set(data, forKey: saveKey)
+        store.set(data, forKey: saveKey)
+    }
+
+    static func loadProgress(from store: UserDefaults, key: String) -> GameProgress {
+        guard let data = store.data(forKey: key) else { return GameProgress() }
+        if let decoded = try? JSONDecoder().decode(GameProgress.self, from: data) {
+            return decoded
+        }
+
+        store.set(data, forKey: key + ".unreadable-backup")
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return GameProgress()
+        }
+
+        var recovered = GameProgress()
+        recovered.coins = object["coins"] as? Int ?? recovered.coins
+        recovered.highestUnlockedLevel = object["highestUnlockedLevel"] as? Int ?? recovered.highestUnlockedLevel
+        recovered.musicEnabled = object["musicEnabled"] as? Bool ?? recovered.musicEnabled
+        recovered.soundEnabled = object["soundEnabled"] as? Bool ?? recovered.soundEnabled
+        recovered.hapticsEnabled = object["hapticsEnabled"] as? Bool ?? recovered.hapticsEnabled
+
+        if let rawShip = object["selectedShip"] as? String, let ship = ShipID(rawValue: rawShip) {
+            recovered.selectedShip = ship
+        }
+        if let rawShips = object["unlockedShips"] as? [String] {
+            let ships = Set(rawShips.compactMap(ShipID.init(rawValue:)))
+            if !ships.isEmpty { recovered.unlockedShips = ships }
+        }
+        return recovered
     }
 }

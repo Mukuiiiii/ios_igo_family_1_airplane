@@ -21,6 +21,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let ship: ShipID
     private let upgradeLevel: Int
     private let session: GameSession
+    private let waveDirector: WaveDirector
 
     private let world = SKNode()
     private let player = SKShapeNode()
@@ -39,12 +40,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var bossInvulnerableUntil = 0.0
     private var didFinish = false
     private var invulnerableUntil = 0.0
+    private var previousDragTranslation: CGSize?
 
     init(size: CGSize, level: LevelDefinition, ship: ShipID, upgradeLevel: Int, session: GameSession) {
         self.level = level
         self.ship = ship
         self.upgradeLevel = upgradeLevel
         self.session = session
+        self.waveDirector = WaveDirector(level: level)
         super.init(size: size)
         anchorPoint = .zero
         backgroundColor = SKColor(red: 0.01, green: 0.015, blue: 0.07, alpha: 1)
@@ -60,11 +63,33 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func movePlayer(normalizedX: CGFloat, normalizedY: CGFloat) {
+    func movePlayer(
+        relativeViewTranslation translation: CGSize,
+        viewSize: CGSize,
+        sensitivity: Double,
+        fingerOffset: Double
+    ) {
         guard session.state == .playing else { return }
-        let x = max(28, min(size.width - 28, normalizedX * size.width))
-        let y = max(80, min(size.height - 80, (1 - normalizedY) * size.height))
-        player.run(.move(to: CGPoint(x: x, y: y), duration: 0.06))
+        guard let previous = previousDragTranslation else {
+            previousDragTranslation = translation
+            return
+        }
+
+        let displayScale = min(viewSize.width / size.width, viewSize.height / size.height)
+        guard displayScale > 0 else { return }
+        let multiplier = CGFloat(sensitivity) / displayScale
+        let deltaX = (translation.width - previous.width) * multiplier
+        let deltaY = (translation.height - previous.height) * multiplier
+        previousDragTranslation = translation
+
+        let lowerLimit = max(80, CGFloat(fingerOffset))
+        let x = max(28, min(size.width - 28, player.position.x + deltaX))
+        let y = max(lowerLimit, min(size.height - 80, player.position.y - deltaY))
+        player.position = CGPoint(x: x, y: y)
+    }
+
+    func endPlayerDrag() {
+        previousDragTranslation = nil
     }
 
     func togglePause() {
@@ -78,9 +103,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     func activateSpecial() {
-        guard session.state == .playing, session.energy >= 1 else { return }
+        guard !didFinish, session.state == .playing, session.energy >= 1 else { return }
         session.energy = 0
-        enumerateChildNodes(withName: "enemyShot") { node, _ in node.removeFromParent() }
+        clearEnemyProjectiles()
         world.children.filter { $0.name == "enemy" || $0.name == "boss" }.forEach { node in
             self.damage(node: node, amount: 18 + self.upgradeLevel * 4)
         }
@@ -104,17 +129,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         scrollBackground(delta: delta)
         scrollStars(delta: delta)
 
-        if boss == nil && session.elapsed >= level.duration {
-            spawnBoss()
-        } else if boss == nil && spawnAccumulator >= level.enemyRate {
-            spawnAccumulator = 0
-            spawnEnemy()
+        if boss == nil {
+            for cue in waveDirector.drainCues(upTo: session.elapsed) {
+                showWaveCue(cue.message)
+                if cue.message.contains("補給") {
+                    spawnSupplyDrop()
+                }
+            }
+            for spawn in waveDirector.drainSpawns(upTo: session.elapsed) {
+                spawnEnemy(archetype: spawn.archetype, normalizedX: spawn.normalizedX)
+            }
+            if session.elapsed >= level.duration {
+                spawnBoss()
+            }
         }
 
-        let fireRate = ship == .tempest ? 0.14 : (ship == .aegis ? 0.24 : 0.18)
-        if shotAccumulator >= fireRate {
+        let weapon = WeaponConfiguration.configuration(for: ship, power: session.power, upgrade: upgradeLevel)
+        if shotAccumulator >= weapon.fireInterval {
             shotAccumulator = 0
-            firePlayerShots()
+            firePlayerShots(configuration: weapon)
         }
 
         if boss != nil {
@@ -132,22 +165,52 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     func didBegin(_ contact: SKPhysicsContact) {
+        guard !didFinish, session.state == .playing else { return }
         let pair = contact.bodyA.categoryBitMask | contact.bodyB.categoryBitMask
         let nodes = [contact.bodyA.node, contact.bodyB.node].compactMap { $0 }
 
         if pair == PhysicsCategory.enemy | PhysicsCategory.playerShot {
             guard let enemy = nodes.first(where: { $0.physicsBody?.categoryBitMask == PhysicsCategory.enemy }),
                   let shot = nodes.first(where: { $0.physicsBody?.categoryBitMask == PhysicsCategory.playerShot }) else { return }
-            shot.removeFromParent()
-            damage(node: enemy, amount: 2 + upgradeLevel)
-        } else if pair == PhysicsCategory.player | PhysicsCategory.enemyShot ||
-                    pair == PhysicsCategory.player | PhysicsCategory.enemy {
-            nodes.first(where: { $0.physicsBody?.categoryBitMask != PhysicsCategory.player })?.removeFromParent()
+            let enemyID = enemy.userData?["hitID"] as? String ?? UUID().uuidString
+            let hitIDs = shot.userData?["hitIDs"] as? NSMutableSet
+            guard hitIDs?.contains(enemyID) != true else { return }
+            hitIDs?.add(enemyID)
+
+            let isPiercing = shot.userData?["piercing"] as? Bool ?? false
+            if !isPiercing {
+                shot.removeFromParent()
+            }
+            let damageAmount = shot.userData?["damage"] as? Int ?? (2 + upgradeLevel)
+            damage(node: enemy, amount: damageAmount)
+        } else if pair == PhysicsCategory.player | PhysicsCategory.enemyShot {
+            nodes.first(where: { $0.physicsBody?.categoryBitMask == PhysicsCategory.enemyShot })?.removeFromParent()
+            hitPlayer()
+        } else if pair == PhysicsCategory.player | PhysicsCategory.enemy {
+            let enemy = nodes.first(where: { $0.physicsBody?.categoryBitMask == PhysicsCategory.enemy })
+            if enemy !== boss {
+                enemy?.removeFromParent()
+            }
             hitPlayer()
         } else if pair == PhysicsCategory.player | PhysicsCategory.pickup {
-            nodes.first(where: { $0.physicsBody?.categoryBitMask == PhysicsCategory.pickup })?.removeFromParent()
-            session.power = min(3, session.power + 1)
-            session.energy = min(1, session.energy + 0.22)
+            guard let pickup = nodes.first(where: { $0.physicsBody?.categoryBitMask == PhysicsCategory.pickup }) else { return }
+            let kind = pickup.userData?["kind"] as? String ?? "power"
+            pickup.removeFromParent()
+            switch kind {
+            case "repair":
+                session.health = min(session.maxHealth, session.health + 2)
+                showWaveCue("修復完成・生命 +2")
+            case "shield":
+                session.shieldCharges = min(1, session.shieldCharges + 1)
+                showWaveCue("護盾充能・可抵擋一次傷害")
+            default:
+                let previousPower = session.power
+                session.power = min(3, session.power + 1)
+                session.energy = min(1, session.energy + 0.22)
+                if session.power > previousPower {
+                    showWaveCue("POWER UP・火力 P\(session.power)")
+                }
+            }
         }
     }
 
@@ -233,54 +296,92 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    private func firePlayerShots() {
-        let count = session.power == 1 ? 1 : (session.power == 2 ? 2 : 3)
+    private func firePlayerShots(configuration: WeaponConfiguration) {
+        let count = configuration.baseProjectileCount
         for index in 0..<count {
-            let shot = SKShapeNode(rectOf: CGSize(width: ship == .aegis ? 5 : 3, height: 18), cornerRadius: 2)
+            let isLaser = configuration.isPiercing
+            let shotSize = CGSize(width: isLaser ? 7 : 4, height: isLaser ? 34 : 18)
+            let shot = SKShapeNode(rectOf: shotSize, cornerRadius: 2)
             shot.fillColor = ship.color.skColor
             shot.strokeColor = .white
-            shot.glowWidth = 4
-            let spacing: CGFloat = 13
-            shot.position = CGPoint(x: player.position.x + (CGFloat(index) - CGFloat(count - 1) / 2) * spacing, y: player.position.y + 30)
+            shot.glowWidth = isLaser ? 7 : 4
+            let spacing: CGFloat = ship == .nova ? 12 : 9
+            let centeredIndex = CGFloat(index) - CGFloat(count - 1) / 2
+            shot.position = CGPoint(x: player.position.x + centeredIndex * spacing, y: player.position.y + 30)
             shot.zPosition = 5
-            shot.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 5, height: 18))
+            shot.userData = [
+                "damage": configuration.baseDamage,
+                "piercing": configuration.isPiercing,
+                "hitIDs": NSMutableSet()
+            ]
+            shot.physicsBody = SKPhysicsBody(rectangleOf: shotSize)
             shot.physicsBody?.categoryBitMask = PhysicsCategory.playerShot
             shot.physicsBody?.contactTestBitMask = PhysicsCategory.enemy
             shot.physicsBody?.collisionBitMask = 0
             world.addChild(shot)
-            shot.run(.sequence([.moveBy(x: 0, y: size.height + 40, duration: 1.0), .removeFromParent()]))
+
+            let angle = ship == .tempest ? centeredIndex * configuration.spreadAngle : 0
+            let travelDistance = size.height + 100
+            let movement = CGVector(dx: sin(angle) * travelDistance, dy: cos(angle) * travelDistance)
+            let duration = TimeInterval(travelDistance / configuration.projectileSpeed)
+            shot.run(.sequence([.move(by: movement, duration: duration), .removeFromParent()]))
         }
     }
 
-    private func spawnEnemy() {
-        let variant = Int.random(in: 0..<3)
+    private func spawnEnemy(archetype: EnemyArchetype, normalizedX: CGFloat) {
+        let variant: Int
+        switch archetype {
+        case .rammer: variant = 0
+        case .strafer: variant = 1
+        case .turret: variant = 2
+        }
+
         let enemy = SKShapeNode(path: enemyPath(variant: variant))
         enemy.name = "enemy"
-        enemy.fillColor = level.accent.skColor
+        enemy.fillColor = archetype == .rammer ? .systemRed : (archetype == .strafer ? level.accent.skColor : .systemOrange)
         enemy.strokeColor = .white
         enemy.glowWidth = 4
-        enemy.position = CGPoint(x: .random(in: 35...(size.width - 35)), y: size.height + 35)
+        enemy.position = CGPoint(x: max(35, min(size.width - 35, normalizedX * size.width)), y: size.height + 35)
         enemy.zPosition = 6
-        enemy.userData = ["hp": 4 + level.id * 2]
+        let hpBonus = archetype == .turret ? 5 : 0
+        enemy.userData = ["hp": 4 + level.id * 2 + hpBonus, "hitID": UUID().uuidString]
         enemy.physicsBody = SKPhysicsBody(circleOfRadius: 18)
         enemy.physicsBody?.categoryBitMask = PhysicsCategory.enemy
         enemy.physicsBody?.contactTestBitMask = PhysicsCategory.player | PhysicsCategory.playerShot
         enemy.physicsBody?.collisionBitMask = 0
         world.addChild(enemy)
 
-        let targetX = CGFloat.random(in: 30...(size.width - 30))
-        let duration = max(2.2, 5.0 - Double(level.id) * 0.35)
-        enemy.run(.sequence([
-            .move(to: CGPoint(x: targetX, y: -40), duration: duration),
-            .removeFromParent()
-        ]))
-
-        let wait = SKAction.wait(forDuration: 0.8)
         let fire = SKAction.run { [weak self, weak enemy] in
-            guard let self, let enemy, enemy.parent != nil else { return }
+            guard let self, let enemy, enemy.parent != nil, !self.didFinish else { return }
             self.fireEnemyShot(from: enemy.position, toward: self.player.position)
         }
-        enemy.run(.repeat(.sequence([wait, fire]), count: 4))
+
+        switch archetype {
+        case .rammer:
+            enemy.run(.sequence([
+                .move(to: player.position, duration: max(1.4, 2.5 - Double(level.id) * 0.12)),
+                .moveBy(x: 0, y: -180, duration: 0.5),
+                .removeFromParent()
+            ]))
+        case .strafer:
+            let sideX: CGFloat = normalizedX < 0.5 ? size.width - 45 : 45
+            enemy.run(.sequence([
+                .move(to: CGPoint(x: sideX, y: size.height * 0.72), duration: 1.0),
+                .group([
+                    .move(to: CGPoint(x: normalizedX * size.width, y: size.height * 0.48), duration: 2.2),
+                    .repeat(.sequence([.wait(forDuration: 0.55), fire]), count: 4)
+                ]),
+                .moveBy(x: 0, y: -size.height, duration: 2.0),
+                .removeFromParent()
+            ]))
+        case .turret:
+            enemy.run(.sequence([
+                .move(to: CGPoint(x: normalizedX * size.width, y: size.height * 0.72), duration: 1.1),
+                .repeat(.sequence([.wait(forDuration: 0.65), fire]), count: 6),
+                .moveBy(x: 0, y: -size.height, duration: 2.5),
+                .removeFromParent()
+            ]))
+        }
     }
 
     private func enemyPath(variant: Int) -> CGPath {
@@ -334,7 +435,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         bossInvulnerableUntil = 0
         session.bossPhase = 1
         session.bossInvulnerable = false
-        shape.userData = ["hp": bossHP]
+        shape.userData = ["hp": bossHP, "hitID": UUID().uuidString]
         shape.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 116, height: 60))
         shape.physicsBody?.categoryBitMask = PhysicsCategory.enemy
         shape.physicsBody?.contactTestBitMask = PhysicsCategory.player | PhysicsCategory.playerShot
@@ -730,7 +831,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         bossModeDuration = Double.random(in: 5...10)
         bossWarningUntil = bossInvulnerableUntil
 
-        world.children.filter { $0.name == "enemyShot" }.forEach { $0.removeFromParent() }
+        clearEnemyProjectiles()
         boss.removeAllActions()
         boss.run(.sequence([
             .group([
@@ -832,6 +933,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func damage(node: SKNode, amount: Int) {
+        guard !didFinish, session.state == .playing else { return }
         guard var hp = node.userData?["hp"] as? Int else { return }
         let isBoss = node === boss
 
@@ -879,15 +981,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    private func spawnPickup(at point: CGPoint) {
-        let pickup = SKShapeNode(circleOfRadius: 11)
+    private func spawnPickup(at point: CGPoint, kind requestedKind: String? = nil) {
+        let kind = requestedKind ?? ["power", "power", "repair", "shield"].randomElement() ?? "power"
+        let pickup = SKShapeNode(circleOfRadius: 12)
         pickup.name = "pickup"
-        pickup.fillColor = .systemGreen
+        pickup.userData = ["kind": kind]
+        switch kind {
+        case "repair": pickup.fillColor = .systemPink
+        case "shield": pickup.fillColor = .systemBlue
+        default: pickup.fillColor = .systemGreen
+        }
         pickup.strokeColor = .white
         pickup.glowWidth = 7
         pickup.position = point
         pickup.zPosition = 7
-        pickup.physicsBody = SKPhysicsBody(circleOfRadius: 11)
+        pickup.physicsBody = SKPhysicsBody(circleOfRadius: 12)
         pickup.physicsBody?.categoryBitMask = PhysicsCategory.pickup
         pickup.physicsBody?.contactTestBitMask = PhysicsCategory.player
         pickup.physicsBody?.collisionBitMask = 0
@@ -895,10 +1003,48 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         pickup.run(.sequence([.moveBy(x: 0, y: -size.height, duration: 5), .removeFromParent()]))
     }
 
+    private func spawnSupplyDrop() {
+        spawnPickup(at: CGPoint(x: size.width * 0.35, y: size.height + 20), kind: "repair")
+        spawnPickup(at: CGPoint(x: size.width * 0.65, y: size.height + 60), kind: "shield")
+    }
+
+    private func showWaveCue(_ text: String) {
+        let label = SKLabelNode(fontNamed: "AvenirNext-Bold")
+        label.text = text
+        label.fontSize = 18
+        label.fontColor = .white
+        label.position = CGPoint(x: size.width / 2, y: size.height * 0.62)
+        label.zPosition = 29
+        label.alpha = 0
+        world.addChild(label)
+        label.run(.sequence([
+            .fadeIn(withDuration: 0.18),
+            .wait(forDuration: 1.15),
+            .fadeOut(withDuration: 0.25),
+            .removeFromParent()
+        ]))
+    }
+
+    private func clearEnemyProjectiles() {
+        world.enumerateChildNodes(withName: "//enemyShot") { node, _ in
+            node.physicsBody = nil
+            node.removeAllActions()
+            node.removeFromParent()
+        }
+    }
+
     private func hitPlayer() {
-        guard session.elapsed >= invulnerableUntil else { return }
+        guard !didFinish, session.state == .playing, session.elapsed >= invulnerableUntil else { return }
         invulnerableUntil = session.elapsed + 1.1
+
+        if session.shieldCharges > 0 {
+            session.shieldCharges -= 1
+            showBossCallout("護盾抵擋傷害")
+            return
+        }
+
         session.health -= 1
+        session.hitsTaken += 1
         player.run(.sequence([
             .fadeAlpha(to: 0.15, duration: 0.1),
             .fadeAlpha(to: 1, duration: 0.1),
@@ -932,8 +1078,52 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func endBattle(victory: Bool) {
         guard !didFinish else { return }
         didFinish = true
-        session.state = victory ? .victory : .defeat
+        removeAllActions()
+        clearEnemyProjectiles()
+
+        world.enumerateChildNodes(withName: "//*") { node, _ in
+            node.physicsBody = nil
+            if ["enemy", "boss", "playerShot", "pickup"].contains(node.name ?? "") {
+                node.removeAllActions()
+            }
+        }
+        player.removeAllActions()
         session.bossVisible = false
+        session.bossInvulnerable = false
+        _ = session.finalize(victory: victory, level: level.id)
+    }
+
+    // Internal hooks keep SpriteKit behavior testable without exposing it to the app UI.
+    func testingSpawnBoss() -> SKNode {
+        if boss == nil { spawnBoss() }
+        return boss ?? SKNode()
+    }
+
+    func testingShouldRemoveEnemyOnPlayerContact(_ node: SKNode) -> Bool {
+        node !== boss
+    }
+
+    func testingEndBattle(victory: Bool) {
+        endBattle(victory: victory)
+    }
+
+    func testingApplyPlayerHit() {
+        hitPlayer()
+    }
+
+    func testingAddEnemyProjectile() {
+        let projectile = makeHostileProjectile(radius: 5, color: .red)
+        world.addChild(projectile)
+    }
+
+    var testingEnemyProjectileCount: Int {
+        var count = 0
+        world.enumerateChildNodes(withName: "//enemyShot") { _, _ in count += 1 }
+        return count
+    }
+
+    func testingClearEnemyProjectiles() {
+        clearEnemyProjectiles()
     }
 }
 

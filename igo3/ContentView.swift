@@ -331,7 +331,8 @@ struct LevelSelectView: View {
                         LevelCard(
                             level: level,
                             isUnlocked: level.id <= model.progress.highestUnlockedLevel,
-                            highScore: model.progress.highScores[level.id, default: 0]
+                            highScore: model.progress.highScores[level.id, default: 0],
+                            stars: model.progress.bestStars[level.id, default: 0]
                         ) {
                             model.start(level: level.id)
                         }
@@ -348,6 +349,7 @@ struct LevelCard: View {
     let level: LevelDefinition
     let isUnlocked: Bool
     let highScore: Int
+    let stars: Int
     let action: () -> Void
 
     var body: some View {
@@ -380,6 +382,13 @@ struct LevelCard: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
+                    HStack(spacing: 2) {
+                        ForEach(1...3, id: \.self) { value in
+                            Image(systemName: value <= stars ? "star.fill" : "star")
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.yellow)
                 }
             }
             .padding()
@@ -423,6 +432,8 @@ struct SettingsView: View {
             .padding(.horizontal)
             .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
 
+            ControlSettingsCard(model: model)
+
             VStack(alignment: .leading, spacing: 12) {
                 Label("操作方式", systemImage: "hand.draw.fill")
                     .font(.headline)
@@ -436,6 +447,45 @@ struct SettingsView: View {
         }
         .padding()
         .frame(maxWidth: 700)
+    }
+}
+
+struct ControlSettingsCard: View {
+    let model: GameAppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("相對拖曳控制", systemImage: "hand.point.up.left.fill")
+                .font(.headline)
+
+            VStack(alignment: .leading) {
+                Text("靈敏度 \(model.progress.controlSensitivity, format: .number.precision(.fractionLength(1)))")
+                    .font(.subheadline)
+                Slider(
+                    value: Binding(
+                        get: { model.progress.controlSensitivity },
+                        set: model.setControlSensitivity
+                    ),
+                    in: 0.6...1.8,
+                    step: 0.1
+                )
+            }
+
+            VStack(alignment: .leading) {
+                Text("底部手指偏移 \(Int(model.progress.fingerOffset))")
+                    .font(.subheadline)
+                Slider(
+                    value: Binding(
+                        get: { model.progress.fingerOffset },
+                        set: model.setFingerOffset
+                    ),
+                    in: 50...140,
+                    step: 5
+                )
+            }
+        }
+        .padding()
+        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
     }
 }
 
@@ -456,54 +506,57 @@ struct SettingToggle: View {
 struct GameContainerView: View {
     let model: GameAppModel
     @Environment(\.scenePhase) private var scenePhase
-    @State private var didRecordResult = false
 
     var body: some View {
         if let scene = model.activeScene, let session = model.session {
             GeometryReader { proxy in
                 ZStack {
                     SpriteView(scene: scene, options: [.ignoresSiblingOrder])
+                        .background(.black)
                         .ignoresSafeArea()
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in
                                     scene.movePlayer(
-                                        normalizedX: value.location.x / max(1, proxy.size.width),
-                                        normalizedY: value.location.y / max(1, proxy.size.height)
+                                        relativeViewTranslation: value.translation,
+                                        viewSize: proxy.size,
+                                        sensitivity: model.progress.controlSensitivity,
+                                        fingerOffset: model.progress.fingerOffset
                                     )
+                                }
+                                .onEnded { _ in
+                                    scene.endPlayerDrag()
                                 }
                         )
 
                     VStack {
-                    BattleHUD(session: session, pauseAction: scene.togglePause)
-                    Spacer()
-                    SpecialButton(energy: session.energy, action: scene.activateSpecial)
-                }
-                .padding()
+                        BattleHUD(session: session, pauseAction: scene.togglePause)
+                        Spacer()
+                        SpecialButton(energy: session.energy, action: scene.activateSpecial)
+                    }
+                    .padding()
 
-                if session.state == .paused {
-                    PauseOverlay(
-                        resumeAction: scene.togglePause,
-                        leaveAction: model.leaveBattle
-                    )
-                }
+                    if session.state == .paused {
+                        PauseOverlay(
+                            resumeAction: scene.togglePause,
+                            leaveAction: model.leaveBattle
+                        )
+                    }
 
-                    if session.state == .victory || session.state == .defeat {
+                    if let settlement = session.settlement {
                         ResultOverlay(
-                            victory: session.state == .victory,
-                            score: session.score,
-                            coins: session.earnedCoins,
+                            settlement: settlement,
+                            canAdvance: settlement.outcome.victory && model.selectedLevel < 5,
                             retryAction: { model.start(level: model.selectedLevel) },
+                            nextAction: model.startNextLevel,
                             leaveAction: model.leaveBattle
                         )
                     }
                 }
             }
             .onChange(of: session.state) { _, newState in
-                guard !didRecordResult,
-                      newState == .victory || newState == .defeat else { return }
-                didRecordResult = true
-                model.finishBattle(victory: newState == .victory)
+                guard newState == .victory || newState == .defeat else { return }
+                model.settleCurrentBattle()
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase != .active && session.state == .playing {
@@ -523,6 +576,17 @@ struct BattleHUD: View {
             HStack {
                 Label("\(session.health)/\(session.maxHealth)", systemImage: "heart.fill")
                     .foregroundStyle(.pink)
+                Text("P\(session.power)")
+                    .font(.caption.weight(.black))
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(.green.opacity(0.18), in: Capsule())
+                if session.shieldCharges > 0 {
+                    Image(systemName: "shield.fill")
+                        .foregroundStyle(.cyan)
+                        .accessibilityLabel("護盾已啟用")
+                }
                 Spacer()
                 Text(session.score, format: .number)
                     .font(.headline.monospacedDigit())
@@ -605,24 +669,46 @@ struct PauseOverlay: View {
 }
 
 struct ResultOverlay: View {
-    let victory: Bool
-    let score: Int
-    let coins: Int
+    let settlement: BattleSettlement
+    let canAdvance: Bool
     let retryAction: () -> Void
+    let nextAction: () -> Void
     let leaveAction: () -> Void
 
     var body: some View {
         OverlayPanel {
-            Image(systemName: victory ? "trophy.fill" : "shield.slash.fill")
+            Image(systemName: settlement.outcome.victory ? "trophy.fill" : "shield.slash.fill")
                 .font(.largeTitle)
-                .foregroundStyle(victory ? .yellow : .red)
-            Text(victory ? "作戰勝利" : "任務失敗")
+                .foregroundStyle(settlement.outcome.victory ? .yellow : .red)
+            Text(settlement.outcome.victory ? "作戰勝利" : "任務失敗")
                 .font(.largeTitle.bold())
-            HStack {
-                StatPill(title: "分數", value: score)
-                StatPill(title: "金幣", value: coins)
+
+            HStack(spacing: 8) {
+                ForEach(1...3, id: \.self) { star in
+                    Image(systemName: star <= settlement.stars ? "star.fill" : "star")
+                        .font(.title2)
+                        .foregroundStyle(star <= settlement.stars ? .yellow : .secondary)
+                }
             }
-            PrimaryButton(title: "再次出擊", systemImage: "arrow.clockwise", action: retryAction)
+
+            HStack {
+                StatPill(title: "分數", value: settlement.outcome.score)
+                StatPill(title: "金幣", value: settlement.earnedCoins)
+            }
+
+            if settlement.isFirstClear {
+                Label("首次通關獎勵已取得", systemImage: "gift.fill")
+                    .foregroundStyle(.yellow)
+            }
+            if settlement.isPersonalBest {
+                Label("個人最佳紀錄！", systemImage: "crown.fill")
+                    .foregroundStyle(.cyan)
+            }
+
+            if canAdvance {
+                PrimaryButton(title: "下一關", systemImage: "arrow.right.circle.fill", action: nextAction)
+            }
+            SecondaryButton(title: "再次出擊", systemImage: "arrow.clockwise", action: retryAction)
             SecondaryButton(title: "返回關卡", systemImage: "map.fill", action: leaveAction)
         }
     }
