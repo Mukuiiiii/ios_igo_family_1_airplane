@@ -13,5 +13,5 @@ struct ContentView: View {
 }
 
 #Playground {
-    _ = 1 + 2 + 3 + 4
+    _ = 1 + 2 + 3 + 7
 }
