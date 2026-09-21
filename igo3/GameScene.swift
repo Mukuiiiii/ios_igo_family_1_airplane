@@ -475,7 +475,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func fireBossPattern() {
         guard let boss else { return }
         let standardBulletCount = 5 + level.id * 2
-        let bulletCount = level.id == 4 ? (standardBulletCount + 1) / 2 : standardBulletCount
+        let bulletCount: Int
+        switch level.id {
+        case 4:
+            bulletCount = (standardBulletCount + 1) / 2
+        case 5:
+            bulletCount = standardBulletCount - 2
+        default:
+            bulletCount = standardBulletCount
+        }
         for index in 0..<bulletCount {
             let angle = CGFloat.pi * 0.22 + CGFloat(index) / CGFloat(bulletCount - 1) * CGFloat.pi * 0.56
             let target = CGPoint(x: boss.position.x + cos(angle) * 500, y: boss.position.y - sin(angle) * 800)
@@ -505,6 +513,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             interval = 1.55
         case .specialTwo where level.id == 3:
             interval = max(1.8, 2.5 - Double(bossPhase - 1) * 0.2)
+        case .specialOne where level.id == 5:
+            interval = 2.4
+        case .specialTwo where level.id == 5:
+            interval = 4.8
         case .specialOne, .specialTwo:
             interval = max(1.8, 2.8 - Double(bossPhase - 1) * 0.25)
         }
@@ -557,7 +569,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case 4:
             deployVoidMines(from: boss.position)
         default:
-            fireDoomsdayBarrage(from: boss.position)
+            firePerimeterTrackingBarrage()
         }
     }
 
@@ -567,7 +579,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case 2: "緋紅封鎖"
         case 3: "追跡脈衝雷射"
         case 4: "虛空追獵"
-        default: "終焉裁決"
+        default: "外環追跡陣"
         }
     }
 
@@ -577,7 +589,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case 2: "赤焰交叉"
         case 3: "廣域殲滅雷射"
         case 4: "暗影飛彈"
-        default: "滅世星環"
+        default: "量子波動"
         }
     }
 
@@ -594,7 +606,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case 4:
             fireShadowFogMissiles(from: boss.position)
         default:
-            fireDoomsdayRing(from: boss.position)
+            fireQuantumWave(from: boss.position)
         }
     }
 
@@ -849,6 +861,126 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             ? CGVector(dx: -direction.dx, dy: direction.dy)
             : CGVector(dx: direction.dx, dy: -direction.dy)
         return (point, reflected)
+    }
+
+    private func firePerimeterTrackingBarrage() {
+        let shotCount = 15
+        for index in 0..<shotCount {
+            run(.sequence([
+                .wait(forDuration: Double(index) * 0.1),
+                .run { [weak self] in
+                    guard let self, !self.didFinish else { return }
+                    let origin = self.randomPerimeterPoint(offset: 24)
+                    let target = self.player.position
+                    self.telegraphPerimeterShot(from: origin, toward: target)
+                }
+            ]))
+        }
+    }
+
+    private func randomPerimeterPoint(offset: CGFloat) -> CGPoint {
+        switch Int.random(in: 0..<4) {
+        case 0:
+            return CGPoint(x: CGFloat.random(in: 0...size.width), y: size.height + offset)
+        case 1:
+            return CGPoint(x: size.width + offset, y: CGFloat.random(in: 0...size.height))
+        case 2:
+            return CGPoint(x: CGFloat.random(in: 0...size.width), y: -offset)
+        default:
+            return CGPoint(x: -offset, y: CGFloat.random(in: 0...size.height))
+        }
+    }
+
+    private func telegraphPerimeterShot(from origin: CGPoint, toward target: CGPoint) {
+        let vector = CGVector(dx: target.x - origin.x, dy: target.y - origin.y)
+        let magnitude = max(1, hypot(vector.dx, vector.dy))
+        let direction = CGVector(dx: vector.dx / magnitude, dy: vector.dy / magnitude)
+        let end = CGPoint(
+            x: origin.x + direction.dx * size.height * 1.7,
+            y: origin.y + direction.dy * size.height * 1.7
+        )
+        let path = CGMutablePath()
+        path.move(to: origin)
+        path.addLine(to: end)
+
+        let warning = SKShapeNode(path: path)
+        warning.name = "bossProjectileWarning"
+        warning.strokeColor = .systemYellow
+        warning.lineWidth = 2
+        warning.glowWidth = 7
+        warning.alpha = 0.85
+        warning.zPosition = 10
+        world.addChild(warning)
+        warning.run(.sequence([
+            .repeat(.sequence([
+                .fadeAlpha(to: 0.25, duration: 0.05),
+                .fadeAlpha(to: 0.9, duration: 0.05)
+            ]), count: 3),
+            .run { [weak self] in
+                self?.spawnHostileProjectile(
+                    from: origin,
+                    toward: target,
+                    duration: 2.25,
+                    radius: 6,
+                    color: .systemYellow
+                )
+            },
+            .fadeOut(withDuration: 0.08),
+            .removeFromParent()
+        ]))
+    }
+
+    private func fireQuantumWave(from origin: CGPoint) {
+        let minimumCount = 32 + bossPhase * 3
+        let maximumCount = 40 + bossPhase * 4
+        let count = Int.random(in: minimumCount...maximumCount)
+        let emissionDuration = TimeInterval.random(in: 1.05...1.4)
+        let decelerationDuration = TimeInterval.random(in: 0.14...0.22)
+        let cruiseDuration = emissionDuration - decelerationDuration
+        let baseSpeed = CGFloat.random(in: 105...130)
+        let speedAmplitude = CGFloat.random(in: 35...52)
+        let angularFrequency = CGFloat(Int.random(in: 4...7))
+        let waveSpeed = CGFloat.random(in: 130...165)
+        let waveDistance = hypot(size.width, size.height) * CGFloat.random(in: 1.65...1.8)
+        let phaseOffset = CGFloat.random(in: 0...(CGFloat.pi * 2))
+
+        for index in 0..<count {
+            let theta = CGFloat(index) / CGFloat(count) * .pi * 2 + phaseOffset
+            let direction = CGVector(dx: cos(theta), dy: sin(theta))
+            let initialSpeed = baseSpeed + speedAmplitude * cos(angularFrequency * theta)
+            let cruise = SKAction.moveBy(
+                x: direction.dx * initialSpeed * cruiseDuration,
+                y: direction.dy * initialSpeed * cruiseDuration,
+                duration: cruiseDuration
+            )
+            cruise.timingMode = .linear
+            let decelerate = SKAction.moveBy(
+                x: direction.dx * initialSpeed * CGFloat(decelerationDuration) / 2,
+                y: direction.dy * initialSpeed * CGFloat(decelerationDuration) / 2,
+                duration: decelerationDuration
+            )
+            decelerate.timingMode = .easeOut
+
+            let particle = makeHostileProjectile(radius: 5, color: .systemPink)
+            particle.position = origin
+            particle.strokeColor = .systemYellow
+            particle.glowWidth = 7
+            world.addChild(particle)
+
+            let waveMovement = SKAction.moveBy(
+                x: direction.dx * waveDistance,
+                y: direction.dy * waveDistance,
+                duration: TimeInterval(waveDistance / waveSpeed)
+            )
+            waveMovement.timingMode = .linear
+            particle.run(.sequence([
+                cruise,
+                decelerate,
+                .wait(forDuration: 1.0),
+                waveMovement,
+                .removeFromParent()
+            ]))
+        }
     }
 
     private func fireDoomsdayRing(from origin: CGPoint) {
