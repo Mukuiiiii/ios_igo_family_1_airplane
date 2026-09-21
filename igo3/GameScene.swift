@@ -21,6 +21,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let ship: ShipID
     private let upgradeLevel: Int
     private let session: GameSession
+    private let audioManager: GameAudioManager
     private let waveDirector: WaveDirector
 
     private let world = SKNode()
@@ -45,11 +46,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var aegisBarrierBlockedDamage = false
     private var previousDragTranslation: CGSize?
 
-    init(size: CGSize, level: LevelDefinition, ship: ShipID, upgradeLevel: Int, session: GameSession) {
+    init(
+        size: CGSize,
+        level: LevelDefinition,
+        ship: ShipID,
+        upgradeLevel: Int,
+        session: GameSession,
+        audioManager: GameAudioManager? = nil
+    ) {
         self.level = level
         self.ship = ship
         self.upgradeLevel = upgradeLevel
         self.session = session
+        self.audioManager = audioManager ?? GameAudioManager()
         self.waveDirector = WaveDirector(level: level)
         super.init(size: size)
         anchorPoint = .zero
@@ -60,6 +69,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         createScrollingBackground()
         createStarfield()
         createPlayer()
+        self.audioManager.playLevelMusic(level: level.id)
     }
 
     required init?(coder aDecoder: NSCoder) {
@@ -98,9 +108,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     func togglePause() {
         if session.state == .playing {
             session.state = .paused
+            audioManager.pause()
             isPaused = true
         } else if session.state == .paused {
             session.state = .playing
+            audioManager.resume()
             isPaused = false
         }
     }
@@ -112,11 +124,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         switch ship {
         case .nova:
+            audioManager.play(.novaSkill)
             activateNovaSpecial()
         case .tempest:
+            audioManager.play(.tempestSkill)
             tempestSpecialUntil = session.elapsed + 5
             showBossCallout("集束射擊・5 秒")
         case .aegis:
+            audioManager.play(.aegisSkill)
             activateAegisBarrier()
         }
     }
@@ -138,6 +153,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func activateAegisBarrier() {
         aegisBarrierUntil = session.elapsed + 3
         aegisBarrierBlockedDamage = false
+        audioManager.startShieldLoop()
 
         let barrier = SKShapeNode(circleOfRadius: 42)
         barrier.name = "playerEnergyBarrier"
@@ -160,6 +176,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             .run { [weak self] in
                 guard let self, !self.didFinish else { return }
                 self.aegisBarrierUntil = 0
+                self.audioManager.stopShieldLoop()
                 if self.aegisBarrierBlockedDamage {
                     self.session.shieldCharges = min(3, self.session.shieldCharges + 1)
                     self.showBossCallout("能量護盾轉化・護盾 +1")
@@ -254,6 +271,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             guard let pickup = nodes.first(where: { $0.physicsBody?.categoryBitMask == PhysicsCategory.pickup }) else { return }
             let kind = pickup.userData?["kind"] as? String ?? "power"
             pickup.removeFromParent()
+            audioManager.play(.pickup)
             switch kind {
             case "repair":
                 session.health = min(session.maxHealth, session.health + 2)
@@ -354,6 +372,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func firePlayerShots(configuration: WeaponConfiguration) {
+        switch ship {
+        case .nova:
+            audioManager.play(.playerNovaShot)
+        case .tempest:
+            audioManager.play(.playerTempestShot)
+        case .aegis:
+            audioManager.play(.playerAegisShot)
+        }
+
         let count = configuration.baseProjectileCount
         for index in 0..<count {
             let isLaser = configuration.isPiercing
@@ -455,7 +482,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return polygon(designs[level.id - 1][variant])
     }
 
-    private func fireEnemyShot(from start: CGPoint, toward target: CGPoint) {
+    private func fireEnemyShot(from start: CGPoint, toward target: CGPoint, playsSound: Bool = true) {
+        if playsSound {
+            audioManager.play(.enemyShot)
+        }
         let shot = SKShapeNode(circleOfRadius: 5)
         shot.name = "enemyShot"
         shot.fillColor = .systemPink
@@ -477,6 +507,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func spawnBoss() {
+        audioManager.playBossMusic(level: level.id)
         let shape = SKShapeNode(path: bossPath())
         shape.name = "boss"
         shape.fillColor = level.accent.skColor
@@ -530,6 +561,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func fireBossPattern() {
         guard let boss else { return }
+        audioManager.play(.bossBasic(level: level.id))
         let standardBulletCount = 5 + level.id * 2
         let bulletCount: Int
         switch level.id {
@@ -543,7 +575,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for index in 0..<bulletCount {
             let angle = CGFloat.pi * 0.22 + CGFloat(index) / CGFloat(bulletCount - 1) * CGFloat.pi * 0.56
             let target = CGPoint(x: boss.position.x + cos(angle) * 500, y: boss.position.y - sin(angle) * 800)
-            fireEnemyShot(from: boss.position, toward: target)
+            fireEnemyShot(from: boss.position, toward: target, playsSound: false)
         }
         let movement = SKAction.moveTo(x: .random(in: 80...(size.width - 80)), duration: 0.7)
         boss.run(movement)
@@ -614,6 +646,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func fireBossSpecial() {
         guard let boss else { return }
+        audioManager.play(.bossSpecial(level: level.id, alternate: false))
 
         switch level.id {
         case 1:
@@ -651,6 +684,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func fireBossAlternateSpecial() {
         guard let boss else { return }
+        audioManager.play(.bossSpecial(level: level.id, alternate: true))
 
         switch level.id {
         case 1:
@@ -1489,6 +1523,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard ship == .aegis, session.elapsed < aegisBarrierUntil else { return false }
 
         aegisBarrierBlockedDamage = true
+        audioManager.play(.shieldBlock)
         projectile?.physicsBody = nil
         projectile?.removeAllActions()
         projectile?.removeFromParent()
@@ -1504,6 +1539,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         if ship == .aegis, session.elapsed < aegisBarrierUntil {
             aegisBarrierBlockedDamage = true
+            audioManager.play(.shieldBlock)
             return
         }
 
@@ -1512,10 +1548,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         if session.shieldCharges > 0 {
             session.shieldCharges -= 1
+            audioManager.play(.shieldBlock)
             showBossCallout("護盾抵擋傷害")
             return
         }
 
+        audioManager.play(.playerHit)
         session.health -= 1
         session.hitsTaken += 1
         player.run(.sequence([
@@ -1552,6 +1590,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard !didFinish else { return }
         didFinish = true
         removeAllActions()
+        audioManager.stopMusic()
+        audioManager.stopShieldLoop()
+        if victory {
+            audioManager.play(.victory)
+        }
         clearEnemyProjectiles()
 
         world.enumerateChildNodes(withName: "//*") { node, _ in

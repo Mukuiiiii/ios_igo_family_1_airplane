@@ -21,6 +21,13 @@ struct ContentView: View {
                 SettingsView(model: model)
             }
         }
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                if model.screen != .game {
+                    model.playTouchFeedback()
+                }
+            }
+        )
         .preferredColorScheme(.dark)
     }
 }
@@ -413,22 +420,12 @@ struct SettingsView: View {
                 model.screen = .menu
             }
 
-            VStack(spacing: 0) {
-                SettingToggle(title: "背景音樂", systemImage: "music.note", isOn: Binding(
-                    get: { model.progress.musicEnabled },
-                    set: model.setMusic
-                ))
-                Divider()
-                SettingToggle(title: "遊戲音效", systemImage: "speaker.wave.2.fill", isOn: Binding(
-                    get: { model.progress.soundEnabled },
-                    set: model.setSound
-                ))
-                Divider()
-                SettingToggle(title: "震動回饋", systemImage: "waveform.path", isOn: Binding(
-                    get: { model.progress.hapticsEnabled },
-                    set: model.setHaptics
-                ))
-            }
+            AudioSettingsCard(model: model)
+
+            SettingToggle(title: "震動回饋", systemImage: "waveform.path", isOn: Binding(
+                get: { model.progress.hapticsEnabled },
+                set: model.setHaptics
+            ))
             .padding(.horizontal)
             .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
 
@@ -447,6 +444,63 @@ struct SettingsView: View {
         }
         .padding()
         .frame(maxWidth: 700)
+    }
+}
+
+struct AudioSettingsCard: View {
+    let model: GameAppModel
+
+    var body: some View {
+        VStack(spacing: 14) {
+            VolumeSliderRow(
+                title: "音量",
+                systemImage: "speaker.wave.2.fill",
+                value: Binding(
+                    get: { model.progress.interfaceVolume },
+                    set: model.setInterfaceVolume
+                )
+            )
+            Divider()
+            VolumeSliderRow(
+                title: "戰鬥音量",
+                systemImage: "burst.fill",
+                value: Binding(
+                    get: { model.progress.combatVolume },
+                    set: model.setCombatVolume
+                )
+            )
+            Divider()
+            VolumeSliderRow(
+                title: "背景音量",
+                systemImage: "music.note",
+                value: Binding(
+                    get: { model.progress.backgroundVolume },
+                    set: model.setBackgroundVolume
+                )
+            )
+        }
+        .padding()
+        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
+    }
+}
+
+struct VolumeSliderRow: View {
+    let title: LocalizedStringKey
+    let systemImage: String
+    @Binding var value: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label(title, systemImage: systemImage)
+                Spacer()
+                Text(value, format: .percent.precision(.fractionLength(0)))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: $value, in: 0...1, step: 0.05)
+                .accessibilityLabel(title)
+        }
     }
 }
 

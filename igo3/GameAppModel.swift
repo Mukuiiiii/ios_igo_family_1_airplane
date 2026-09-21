@@ -10,6 +10,7 @@ final class GameAppModel {
     var selectedLevel = 1
     var session: GameSession?
     var activeScene: GameScene?
+    let audioManager: GameAudioManager
 
     private let store: UserDefaults
     private let saveKey: String
@@ -18,6 +19,12 @@ final class GameAppModel {
         self.store = store
         self.saveKey = saveKey
         progress = Self.loadProgress(from: store, key: saveKey)
+        audioManager = GameAudioManager()
+        audioManager.updateVolumes(
+            interface: progress.interfaceVolume,
+            combat: progress.combatVolume,
+            background: progress.backgroundVolume
+        )
     }
 
     var selectedShip: ShipID { progress.selectedShip }
@@ -68,7 +75,8 @@ final class GameAppModel {
             level: definition,
             ship: progress.selectedShip,
             upgradeLevel: upgrade,
-            session: battle
+            session: battle,
+            audioManager: audioManager
         )
         scene.scaleMode = .aspectFit
         activeScene = scene
@@ -124,6 +132,7 @@ final class GameAppModel {
 
     func leaveBattle() {
         activeScene?.isPaused = true
+        audioManager.stopAll()
         activeScene = nil
         session = nil
         screen = .levels
@@ -142,6 +151,36 @@ final class GameAppModel {
     func setHaptics(_ enabled: Bool) {
         progress.hapticsEnabled = enabled
         save()
+    }
+
+    func setInterfaceVolume(_ value: Double) {
+        progress.interfaceVolume = value
+        applyAudioVolumes()
+        save()
+    }
+
+    func setCombatVolume(_ value: Double) {
+        progress.combatVolume = value
+        applyAudioVolumes()
+        save()
+    }
+
+    func setBackgroundVolume(_ value: Double) {
+        progress.backgroundVolume = value
+        applyAudioVolumes()
+        save()
+    }
+
+    func playTouchFeedback() {
+        audioManager.play(.interfaceTap)
+    }
+
+    private func applyAudioVolumes() {
+        audioManager.updateVolumes(
+            interface: progress.interfaceVolume,
+            combat: progress.combatVolume,
+            background: progress.backgroundVolume
+        )
     }
 
     func setControlSensitivity(_ value: Double) {
@@ -176,6 +215,9 @@ final class GameAppModel {
         recovered.musicEnabled = object["musicEnabled"] as? Bool ?? recovered.musicEnabled
         recovered.soundEnabled = object["soundEnabled"] as? Bool ?? recovered.soundEnabled
         recovered.hapticsEnabled = object["hapticsEnabled"] as? Bool ?? recovered.hapticsEnabled
+        recovered.interfaceVolume = object["interfaceVolume"] as? Double ?? recovered.interfaceVolume
+        recovered.combatVolume = object["combatVolume"] as? Double ?? recovered.combatVolume
+        recovered.backgroundVolume = object["backgroundVolume"] as? Double ?? recovered.backgroundVolume
 
         if let rawShip = object["selectedShip"] as? String, let ship = ShipID(rawValue: rawShip) {
             recovered.selectedShip = ship

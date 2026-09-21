@@ -143,7 +143,7 @@ struct LevelDefinition: Identifiable, Equatable {
 }
 
 struct GameProgress: Codable, Equatable {
-    static let currentVersion = 2
+    static let currentVersion = 3
 
     var version: Int
     var coins: Int
@@ -157,6 +157,9 @@ struct GameProgress: Codable, Equatable {
     var musicEnabled: Bool
     var soundEnabled: Bool
     var hapticsEnabled: Bool
+    var interfaceVolume: Double
+    var combatVolume: Double
+    var backgroundVolume: Double
     var controlSensitivity: Double
     var fingerOffset: Double
 
@@ -173,6 +176,9 @@ struct GameProgress: Codable, Equatable {
         musicEnabled: Bool = true,
         soundEnabled: Bool = true,
         hapticsEnabled: Bool = true,
+        interfaceVolume: Double = 0.8,
+        combatVolume: Double = 0.8,
+        backgroundVolume: Double = 0.65,
         controlSensitivity: Double = 1,
         fingerOffset: Double = 70
     ) {
@@ -188,6 +194,9 @@ struct GameProgress: Codable, Equatable {
         self.musicEnabled = musicEnabled
         self.soundEnabled = soundEnabled
         self.hapticsEnabled = hapticsEnabled
+        self.interfaceVolume = interfaceVolume
+        self.combatVolume = combatVolume
+        self.backgroundVolume = backgroundVolume
         self.controlSensitivity = controlSensitivity
         self.fingerOffset = fingerOffset
     }
@@ -206,6 +215,9 @@ struct GameProgress: Codable, Equatable {
         musicEnabled = try values.decodeIfPresent(Bool.self, forKey: .musicEnabled) ?? true
         soundEnabled = try values.decodeIfPresent(Bool.self, forKey: .soundEnabled) ?? true
         hapticsEnabled = try values.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? true
+        interfaceVolume = try values.decodeIfPresent(Double.self, forKey: .interfaceVolume) ?? (soundEnabled ? 0.8 : 0)
+        combatVolume = try values.decodeIfPresent(Double.self, forKey: .combatVolume) ?? (soundEnabled ? 0.8 : 0)
+        backgroundVolume = try values.decodeIfPresent(Double.self, forKey: .backgroundVolume) ?? (musicEnabled ? 0.65 : 0)
         controlSensitivity = try values.decodeIfPresent(Double.self, forKey: .controlSensitivity) ?? 1
         fingerOffset = try values.decodeIfPresent(Double.self, forKey: .fingerOffset) ?? 70
         version = Self.currentVersion
