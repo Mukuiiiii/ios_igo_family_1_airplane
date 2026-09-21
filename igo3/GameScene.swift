@@ -184,7 +184,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let damageAmount = shot.userData?["damage"] as? Int ?? (2 + upgradeLevel)
             damage(node: enemy, amount: damageAmount)
         } else if pair == PhysicsCategory.player | PhysicsCategory.enemyShot {
-            nodes.first(where: { $0.physicsBody?.categoryBitMask == PhysicsCategory.enemyShot })?.removeFromParent()
+            let hostileShot = nodes.first(where: { $0.physicsBody?.categoryBitMask == PhysicsCategory.enemyShot })
+            let isPersistent = hostileShot?.userData?["persistent"] as? Bool ?? false
+            if !isPersistent {
+                hostileShot?.removeFromParent()
+            }
             hitPlayer()
         } else if pair == PhysicsCategory.player | PhysicsCategory.enemy {
             let enemy = nodes.first(where: { $0.physicsBody?.categoryBitMask == PhysicsCategory.enemy })
@@ -470,7 +474,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func fireBossPattern() {
         guard let boss else { return }
-        let bulletCount = 5 + level.id * 2
+        let standardBulletCount = 5 + level.id * 2
+        let bulletCount = level.id == 4 ? (standardBulletCount + 1) / 2 : standardBulletCount
         for index in 0..<bulletCount {
             let angle = CGFloat.pi * 0.22 + CGFloat(index) / CGFloat(bulletCount - 1) * CGFloat.pi * 0.56
             let target = CGPoint(x: boss.position.x + cos(angle) * 500, y: boss.position.y - sin(angle) * 800)
@@ -495,6 +500,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         switch bossAttackMode {
         case .basic:
             interval = max(0.38, 0.86 - Double(level.id) * 0.06 - Double(bossPhase - 1) * 0.05)
+        case .specialOne where level.id == 3:
+            // 0.22 秒警示、0.9 秒照射與淡出完成後，至少保留 0.2 秒空檔。
+            interval = 1.55
+        case .specialTwo where level.id == 3:
+            interval = max(1.8, 2.5 - Double(bossPhase - 1) * 0.2)
         case .specialOne, .specialTwo:
             interval = max(1.8, 2.8 - Double(bossPhase - 1) * 0.25)
         }
@@ -520,7 +530,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         switch bossAttackMode {
         case .basic:
             bossAttackMode = Bool.random() ? .specialOne : .specialTwo
-            bossWarningUntil = session.elapsed + 1.0
+            let warningDuration: TimeInterval
+            if level.id == 3 {
+                warningDuration = bossAttackMode == .specialOne ? 0.55 : 1.4
+            } else {
+                warningDuration = 1.0
+            }
+            bossWarningUntil = session.elapsed + warningDuration
             showBossWarning(bossAttackMode == .specialOne ? specialName : alternateSpecialName)
         case .specialOne, .specialTwo:
             bossAttackMode = .basic
@@ -537,7 +553,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case 2:
             fireCrimsonLanes(from: boss.position)
         case 3:
-            fireThunderCage(from: boss.position)
+            fireRapidTrackingLaser(from: boss.position)
         case 4:
             deployVoidMines(from: boss.position)
         default:
@@ -549,7 +565,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         switch level.id {
         case 1: "星旋爆發"
         case 2: "緋紅封鎖"
-        case 3: "雷霆牢籠"
+        case 3: "追跡脈衝雷射"
         case 4: "虛空追獵"
         default: "終焉裁決"
         }
@@ -559,7 +575,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         switch level.id {
         case 1: "彗星追擊"
         case 2: "赤焰交叉"
-        case 3: "天雷降臨"
+        case 3: "廣域殲滅雷射"
         case 4: "暗影飛彈"
         default: "滅世星環"
         }
@@ -574,9 +590,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case 2:
             fireCrimsonCrossfire(from: boss.position)
         case 3:
-            fireLightningRain()
+            fireWideAreaLaser(from: boss.position)
         case 4:
-            fireHomingSwarm(from: boss.position)
+            fireShadowFogMissiles(from: boss.position)
         default:
             fireDoomsdayRing(from: boss.position)
         }
@@ -631,17 +647,208 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    private func fireHomingSwarm(from origin: CGPoint) {
-        let count = 5 + bossPhase
+    private func fireRapidTrackingLaser(from origin: CGPoint) {
+        telegraphLaser(
+            from: origin,
+            toward: player.position,
+            width: 10,
+            warningDuration: 0.22,
+            beamDuration: 0.9,
+            color: .systemCyan
+        )
+    }
+
+    private func fireWideAreaLaser(from origin: CGPoint) {
+        telegraphLaser(
+            from: origin,
+            toward: player.position,
+            width: 105 + CGFloat(bossPhase) * 14,
+            warningDuration: 0.75,
+            beamDuration: 1.7,
+            color: .systemPurple
+        )
+    }
+
+    private func telegraphLaser(
+        from origin: CGPoint,
+        toward target: CGPoint,
+        width: CGFloat,
+        warningDuration: TimeInterval,
+        beamDuration: TimeInterval,
+        color: SKColor
+    ) {
+        let geometry = laserGeometry(from: origin, toward: target)
+        let warning = SKShapeNode(rectOf: CGSize(width: width, height: geometry.length), cornerRadius: width / 2)
+        warning.name = "bossLaserWarning"
+        warning.position = geometry.center
+        warning.zRotation = geometry.angle - .pi / 2
+        warning.fillColor = color.withAlphaComponent(0.13)
+        warning.strokeColor = color.withAlphaComponent(0.9)
+        warning.lineWidth = max(2, min(6, width * 0.08))
+        warning.zPosition = 11
+        world.addChild(warning)
+
+        warning.run(.sequence([
+            .repeat(.sequence([
+                .fadeAlpha(to: 0.35, duration: 0.08),
+                .fadeAlpha(to: 1, duration: 0.08)
+            ]), count: max(1, Int(warningDuration / 0.16))),
+            .run { [weak self, weak warning] in
+                guard let self, !self.didFinish else { return }
+                warning?.removeFromParent()
+                self.spawnLaserBeam(
+                    from: origin,
+                    toward: target,
+                    width: width,
+                    duration: beamDuration,
+                    color: color
+                )
+            }
+        ]))
+    }
+
+    private func spawnLaserBeam(
+        from origin: CGPoint,
+        toward target: CGPoint,
+        width: CGFloat,
+        duration: TimeInterval,
+        color: SKColor
+    ) {
+        let geometry = laserGeometry(from: origin, toward: target)
+        let beam = SKShapeNode(rectOf: CGSize(width: width, height: geometry.length), cornerRadius: width / 2)
+        beam.name = "enemyShot"
+        beam.position = geometry.center
+        beam.zRotation = geometry.angle - .pi / 2
+        beam.fillColor = color.withAlphaComponent(width > 40 ? 0.72 : 0.9)
+        beam.strokeColor = .white
+        beam.lineWidth = width > 40 ? 5 : 2
+        beam.glowWidth = width > 40 ? 24 : 12
+        beam.zPosition = 12
+        beam.userData = ["persistent": true]
+        beam.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: width, height: geometry.length))
+        beam.physicsBody?.categoryBitMask = PhysicsCategory.enemyShot
+        beam.physicsBody?.contactTestBitMask = PhysicsCategory.player
+        beam.physicsBody?.collisionBitMask = 0
+        world.addChild(beam)
+        beam.run(.sequence([
+            .fadeIn(withDuration: 0.06),
+            .wait(forDuration: duration),
+            .fadeOut(withDuration: 0.18),
+            .removeFromParent()
+        ]))
+    }
+
+    private func laserGeometry(from origin: CGPoint, toward target: CGPoint) -> (center: CGPoint, angle: CGFloat, length: CGFloat) {
+        let vector = CGVector(dx: target.x - origin.x, dy: target.y - origin.y)
+        let magnitude = max(1, hypot(vector.dx, vector.dy))
+        let length = size.height * 1.55
+        let end = CGPoint(
+            x: origin.x + vector.dx / magnitude * length,
+            y: origin.y + vector.dy / magnitude * length
+        )
+        return (
+            CGPoint(x: (origin.x + end.x) / 2, y: (origin.y + end.y) / 2),
+            atan2(vector.dy, vector.dx),
+            length
+        )
+    }
+
+    private func fireShadowFogMissiles(from origin: CGPoint) {
+        let count = 4 + bossPhase * 2
+        let baseAngle = atan2(player.position.y - origin.y, player.position.x - origin.x)
+        let spread: CGFloat = 1.15
+
         for index in 0..<count {
-            run(.sequence([
-                .wait(forDuration: Double(index) * 0.12),
-                .run { [weak self] in
-                    guard let self else { return }
-                    self.fireAimedBurst(from: origin, color: .systemGreen, count: 1)
-                }
-            ]))
+            let progress = count == 1 ? 0.5 : CGFloat(index) / CGFloat(count - 1)
+            let angle = baseAngle - spread / 2 + spread * progress
+            let missile = makeHostileProjectile(radius: 9, color: .systemPurple)
+            missile.position = origin
+            missile.strokeColor = .systemIndigo
+            missile.glowWidth = 9
+            missile.zPosition = 8
+            world.addChild(missile)
+
+            let bounceCount = Int.random(in: 1...3)
+            let movement = shadowMissileMovement(
+                from: origin,
+                direction: CGVector(dx: cos(angle), dy: sin(angle)),
+                bounceCount: bounceCount
+            )
+            let becomeFog = SKAction.sequence([
+                .wait(forDuration: 0.7),
+                .group([
+                    .fadeAlpha(to: 0.3, duration: 1.0),
+                    .scale(to: 1.9, duration: 1.0),
+                    .colorize(with: .darkGray, colorBlendFactor: 0.72, duration: 1.0)
+                ])
+            ])
+            missile.run(.group([movement, becomeFog]))
         }
+    }
+
+    private func shadowMissileMovement(
+        from origin: CGPoint,
+        direction initialDirection: CGVector,
+        bounceCount: Int
+    ) -> SKAction {
+        var position = origin
+        var direction = initialDirection
+        var actions: [SKAction] = []
+        let speed: CGFloat = 105
+
+        for _ in 0..<bounceCount {
+            let impact = nextBoundaryImpact(from: position, direction: direction, inset: 12)
+            let distance = hypot(impact.point.x - position.x, impact.point.y - position.y)
+            actions.append(.move(to: impact.point, duration: TimeInterval(distance / speed)))
+            actions.append(.scale(to: 2.05, duration: 0.08))
+            actions.append(.scale(to: 1.9, duration: 0.08))
+            position = impact.point
+            direction = impact.reflectedDirection
+        }
+
+        let exitDistance = size.height * 1.7
+        let exitPoint = CGPoint(
+            x: position.x + direction.dx * exitDistance,
+            y: position.y + direction.dy * exitDistance
+        )
+        actions.append(.move(to: exitPoint, duration: TimeInterval(exitDistance / speed)))
+        actions.append(.removeFromParent())
+        return .sequence(actions)
+    }
+
+    private func nextBoundaryImpact(
+        from position: CGPoint,
+        direction: CGVector,
+        inset: CGFloat
+    ) -> (point: CGPoint, reflectedDirection: CGVector) {
+        let minX = inset
+        let maxX = size.width - inset
+        let minY = inset
+        let maxY = size.height - inset
+        var candidates: [(time: CGFloat, verticalWall: Bool)] = []
+
+        if direction.dx > 0 {
+            candidates.append(((maxX - position.x) / direction.dx, true))
+        } else if direction.dx < 0 {
+            candidates.append(((minX - position.x) / direction.dx, true))
+        }
+        if direction.dy > 0 {
+            candidates.append(((maxY - position.y) / direction.dy, false))
+        } else if direction.dy < 0 {
+            candidates.append(((minY - position.y) / direction.dy, false))
+        }
+
+        let impact = candidates
+            .filter { $0.time > 0.01 }
+            .min { $0.time < $1.time } ?? (1, false)
+        let point = CGPoint(
+            x: position.x + direction.dx * impact.time,
+            y: position.y + direction.dy * impact.time
+        )
+        let reflected = impact.verticalWall
+            ? CGVector(dx: -direction.dx, dy: direction.dy)
+            : CGVector(dx: direction.dx, dy: -direction.dy)
+        return (point, reflected)
     }
 
     private func fireDoomsdayRing(from origin: CGPoint) {
@@ -744,7 +951,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     .move(to: destination, duration: 0.7),
                     .scale(to: 1, duration: 0.7)
                 ]),
-                .wait(forDuration: 0.7),
+                .wait(forDuration: 0.65 + Double(index) * 0.32),
                 .run { [weak self, weak mine] in
                     guard let self, let mine, mine.parent != nil else { return }
                     let target = self.player.position
@@ -754,7 +961,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                         x: mine.position.x + vector.dx / length * self.size.height,
                         y: mine.position.y + vector.dy / length * self.size.height
                     )
-                    mine.run(.sequence([.move(to: end, duration: 2.0), .removeFromParent()]))
+                    mine.run(.sequence([
+                        .move(to: end, duration: 2.0),
+                        .removeFromParent()
+                    ]))
                 }
             ]))
         }
@@ -876,18 +1086,51 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         switch level.id {
         case 1: "星核超新星"
         case 2: "血色天幕"
-        case 3: "雷神領域"
+        case 3: "五重殲滅雷射"
         case 4: "虛空吞噬"
         default: "終焉審判"
         }
     }
 
     private func fireBossUltimate() {
+        if level.id == 3 {
+            fireLevelThreeLaserUltimate()
+            return
+        }
+
         fireBossSpecial()
         run(.sequence([
             .wait(forDuration: 0.55),
             .run { [weak self] in self?.fireBossAlternateSpecial() }
         ]))
+    }
+
+    private func fireLevelThreeLaserUltimate() {
+        guard let boss else { return }
+        let origin = boss.position
+        let bottomCenter = CGPoint(x: size.width / 2, y: -80)
+        let warningDuration: TimeInterval = 0.85
+
+        telegraphLaser(
+            from: origin,
+            toward: bottomCenter,
+            width: 125 + CGFloat(bossPhase) * 16,
+            warningDuration: warningDuration,
+            beamDuration: 1.9,
+            color: .systemPurple
+        )
+
+        // 以中央廣域雷射為軸，左右各兩束脈衝雷射同步、對稱展開。
+        for offset in [-300.0, -150.0, 150.0, 300.0] {
+            telegraphLaser(
+                from: origin,
+                toward: CGPoint(x: bottomCenter.x + CGFloat(offset), y: bottomCenter.y),
+                width: 12,
+                warningDuration: warningDuration,
+                beamDuration: 1.15,
+                color: .systemCyan
+            )
+        }
     }
 
     private func showBossWarning(_ attackName: String) {

@@ -60,3 +60,30 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# macOS metadata
+.DS_Store
+
+# Xcode build output and archives
+DerivedData/
+build/
+dist/
+*.xcarchive
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+
+# Signing credentials and provisioning profiles
+*.mobileprovision
+*.provisionprofile
+*.p12
+*.p8
+*.cer
+*.key
+
+# Local secrets and environment overrides
+.env
+.env.*
+Secrets.xcconfig
+Local.xcconfig
+*.secrets
