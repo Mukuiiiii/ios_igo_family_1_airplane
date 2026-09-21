@@ -40,6 +40,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var bossInvulnerableUntil = 0.0
     private var didFinish = false
     private var invulnerableUntil = 0.0
+    private var tempestSpecialUntil = 0.0
+    private var aegisBarrierUntil = 0.0
+    private var aegisBarrierBlockedDamage = false
     private var previousDragTranslation: CGSize?
 
     init(size: CGSize, level: LevelDefinition, ship: ShipID, upgradeLevel: Int, session: GameSession) {
@@ -103,11 +106,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     func activateSpecial() {
-        guard !didFinish, session.state == .playing, session.energy >= 1 else { return }
+        let requirement = Double(ship.specialDamageRequirement)
+        guard !didFinish, session.state == .playing, session.energy >= requirement else { return }
         session.energy = 0
+
+        switch ship {
+        case .nova:
+            activateNovaSpecial()
+        case .tempest:
+            tempestSpecialUntil = session.elapsed + 5
+            showBossCallout("集束射擊・5 秒")
+        case .aegis:
+            activateAegisBarrier()
+        }
+    }
+
+    private func activateNovaSpecial() {
         clearEnemyProjectiles()
         world.children.filter { $0.name == "enemy" || $0.name == "boss" }.forEach { node in
-            self.damage(node: node, amount: 18 + self.upgradeLevel * 4)
+            self.damage(node: node, amount: 18 + self.upgradeLevel * 4, chargesSpecial: false)
         }
         let flash = SKShapeNode(circleOfRadius: size.width * 0.7)
         flash.fillColor = .cyan.withAlphaComponent(0.22)
@@ -116,6 +133,40 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         flash.zPosition = 20
         addChild(flash)
         flash.run(.sequence([.scale(to: 1.5, duration: 0.25), .fadeOut(withDuration: 0.25), .removeFromParent()]))
+    }
+
+    private func activateAegisBarrier() {
+        aegisBarrierUntil = session.elapsed + 3
+        aegisBarrierBlockedDamage = false
+
+        let barrier = SKShapeNode(circleOfRadius: 42)
+        barrier.name = "playerEnergyBarrier"
+        barrier.fillColor = .systemCyan.withAlphaComponent(0.16)
+        barrier.strokeColor = .white
+        barrier.lineWidth = 4
+        barrier.glowWidth = 14
+        barrier.zPosition = -1
+        player.addChild(barrier)
+        barrier.run(.sequence([
+            .repeat(.sequence([
+                .scale(to: 1.08, duration: 0.25),
+                .scale(to: 0.96, duration: 0.25)
+            ]), count: 6),
+            .removeFromParent()
+        ]))
+
+        run(.sequence([
+            .wait(forDuration: 3),
+            .run { [weak self] in
+                guard let self, !self.didFinish else { return }
+                self.aegisBarrierUntil = 0
+                if self.aegisBarrierBlockedDamage {
+                    self.session.shieldCharges = min(3, self.session.shieldCharges + 1)
+                    self.showBossCallout("能量護盾轉化・護盾 +1")
+                }
+                self.aegisBarrierBlockedDamage = false
+            }
+        ]))
     }
 
     override func update(_ currentTime: TimeInterval) {
@@ -185,6 +236,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             damage(node: enemy, amount: damageAmount)
         } else if pair == PhysicsCategory.player | PhysicsCategory.enemyShot {
             let hostileShot = nodes.first(where: { $0.physicsBody?.categoryBitMask == PhysicsCategory.enemyShot })
+            if absorbProjectileWithAegisBarrier(hostileShot) {
+                return
+            }
             let isPersistent = hostileShot?.userData?["persistent"] as? Bool ?? false
             if !isPersistent {
                 hostileShot?.removeFromParent()
@@ -205,12 +259,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 session.health = min(session.maxHealth, session.health + 2)
                 showWaveCue("修復完成・生命 +2")
             case "shield":
-                session.shieldCharges = min(1, session.shieldCharges + 1)
-                showWaveCue("護盾充能・可抵擋一次傷害")
+                session.shieldCharges = min(3, session.shieldCharges + 1)
+                showWaveCue("護盾充能・目前 \(session.shieldCharges)/3")
             default:
                 let previousPower = session.power
                 session.power = min(3, session.power + 1)
-                session.energy = min(1, session.energy + 0.22)
                 if session.power > previousPower {
                     showWaveCue("POWER UP・火力 P\(session.power)")
                 }
@@ -324,7 +377,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             shot.physicsBody?.collisionBitMask = 0
             world.addChild(shot)
 
-            let angle = ship == .tempest ? centeredIndex * configuration.spreadAngle : 0
+            let isTempestFocused = ship == .tempest && session.elapsed < tempestSpecialUntil
+            let angle = ship == .tempest && !isTempestFocused
+                ? centeredIndex * configuration.spreadAngle
+                : 0
             let travelDistance = size.height + 100
             let movement = CGVector(dx: sin(angle) * travelDistance, dy: cos(angle) * travelDistance)
             let duration = TimeInterval(travelDistance / configuration.projectileSpeed)
@@ -1174,6 +1230,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         bossWarningUntil = bossInvulnerableUntil
 
         clearEnemyProjectiles()
+        spawnBossPhasePickups(at: boss.position)
         boss.removeAllActions()
         boss.run(.sequence([
             .group([
@@ -1307,7 +1364,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ]))
     }
 
-    private func damage(node: SKNode, amount: Int) {
+    private func damage(node: SKNode, amount: Int, chargesSpecial: Bool = true) {
         guard !didFinish, session.state == .playing else { return }
         guard var hp = node.userData?["hp"] as? Int else { return }
         let isBoss = node === boss
@@ -1316,6 +1373,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return
         }
 
+        let originalHP = hp
         hp -= amount
 
         if isBoss {
@@ -1323,16 +1381,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let phaseThreeThreshold = level.bossHealth / 3
 
             if bossPhase == 1, hp <= phaseTwoThreshold {
+                chargeSpecial(by: originalHP - phaseTwoThreshold, enabled: chargesSpecial)
                 beginBossPhaseTransition(to: 2, at: phaseTwoThreshold)
                 return
             }
 
             if bossPhase == 2, hp <= phaseThreeThreshold {
+                chargeSpecial(by: originalHP - phaseThreeThreshold, enabled: chargesSpecial)
                 beginBossPhaseTransition(to: 3, at: phaseThreeThreshold)
                 return
             }
         }
 
+        chargeSpecial(by: min(originalHP, amount), enabled: chargesSpecial)
         node.userData?["hp"] = hp
         node.run(.sequence([.fadeAlpha(to: 0.35, duration: 0.04), .fadeAlpha(to: 1, duration: 0.06)]))
 
@@ -1345,7 +1406,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             explode(at: node.position, color: (node as? SKShapeNode)?.fillColor ?? .white)
             node.removeFromParent()
             session.score += isBoss ? level.id * 2_000 : 100 * level.id
-            session.energy = min(1, session.energy + (isBoss ? 0.3 : 0.06))
             if isBoss {
                 boss = nil
                 session.bossInvulnerable = false
@@ -1354,6 +1414,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 spawnPickup(at: node.position)
             }
         }
+    }
+
+    private func chargeSpecial(by damage: Int, enabled: Bool) {
+        guard enabled, damage > 0 else { return }
+        let maximum = Double(ship.specialDamageRequirement)
+        session.energy = min(maximum, session.energy + Double(damage))
     }
 
     private func spawnPickup(at point: CGPoint, kind requestedKind: String? = nil) {
@@ -1383,6 +1449,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         spawnPickup(at: CGPoint(x: size.width * 0.65, y: size.height + 60), kind: "shield")
     }
 
+    private func spawnBossPhasePickups(at point: CGPoint) {
+        for index in 0..<3 {
+            let offset = CGFloat(index - 1) * 46
+            let dropPoint = CGPoint(
+                x: max(20, min(size.width - 20, point.x + offset)),
+                y: point.y - CGFloat(index) * 12
+            )
+            spawnPickup(at: dropPoint)
+        }
+    }
+
     private func showWaveCue(_ text: String) {
         let label = SKLabelNode(fontNamed: "AvenirNext-Bold")
         label.text = text
@@ -1408,8 +1485,29 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
+    private func absorbProjectileWithAegisBarrier(_ projectile: SKNode?) -> Bool {
+        guard ship == .aegis, session.elapsed < aegisBarrierUntil else { return false }
+
+        aegisBarrierBlockedDamage = true
+        projectile?.physicsBody = nil
+        projectile?.removeAllActions()
+        projectile?.removeFromParent()
+        player.childNode(withName: "playerEnergyBarrier")?.run(.sequence([
+            .fadeAlpha(to: 0.35, duration: 0.04),
+            .fadeAlpha(to: 1, duration: 0.08)
+        ]))
+        return true
+    }
+
     private func hitPlayer() {
-        guard !didFinish, session.state == .playing, session.elapsed >= invulnerableUntil else { return }
+        guard !didFinish, session.state == .playing else { return }
+
+        if ship == .aegis, session.elapsed < aegisBarrierUntil {
+            aegisBarrierBlockedDamage = true
+            return
+        }
+
+        guard session.elapsed >= invulnerableUntil else { return }
         invulnerableUntil = session.elapsed + 1.1
 
         if session.shieldCharges > 0 {

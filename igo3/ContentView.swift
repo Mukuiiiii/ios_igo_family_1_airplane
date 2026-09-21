@@ -532,7 +532,12 @@ struct GameContainerView: View {
                     VStack {
                         BattleHUD(session: session, pauseAction: scene.togglePause)
                         Spacer()
-                        SpecialButton(energy: session.energy, action: scene.activateSpecial)
+                        SpecialButton(
+                            charge: session.energy,
+                            requirement: model.progress.selectedShip.specialDamageRequirement,
+                            name: model.progress.selectedShip.specialName,
+                            action: scene.activateSpecial
+                        )
                     }
                     .padding()
 
@@ -583,9 +588,10 @@ struct BattleHUD: View {
                     .padding(.vertical, 4)
                     .background(.green.opacity(0.18), in: Capsule())
                 if session.shieldCharges > 0 {
-                    Image(systemName: "shield.fill")
+                    Label("\(session.shieldCharges)/3", systemImage: "shield.fill")
+                        .font(.caption.weight(.bold))
                         .foregroundStyle(.cyan)
-                        .accessibilityLabel("護盾已啟用")
+                        .accessibilityLabel("護盾 \(session.shieldCharges) 層，共 3 層")
                 }
                 Spacer()
                 Text(session.score, format: .number)
@@ -626,8 +632,18 @@ struct BattleHUD: View {
 }
 
 struct SpecialButton: View {
-    let energy: Double
+    let charge: Double
+    let requirement: Int
+    let name: LocalizedStringResource
     let action: () -> Void
+
+    private var progress: Double {
+        min(1, charge / Double(max(1, requirement)))
+    }
+
+    private var isReady: Bool {
+        charge >= Double(requirement)
+    }
 
     var body: some View {
         HStack {
@@ -637,19 +653,19 @@ struct SpecialButton: View {
                     Circle()
                         .stroke(.white.opacity(0.25), lineWidth: 5)
                     Circle()
-                        .trim(from: 0, to: energy)
+                        .trim(from: 0, to: progress)
                         .stroke(.cyan, style: StrokeStyle(lineWidth: 5, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                     Image(systemName: "bolt.fill")
                         .font(.title2)
-                        .foregroundStyle(energy >= 1 ? .yellow : .secondary)
+                        .foregroundStyle(isReady ? .yellow : .secondary)
                 }
                 .frame(width: 66, height: 66)
                 .background(.black.opacity(0.45), in: Circle())
             }
-            .disabled(energy < 1)
-            .accessibilityLabel("雷霆爆發")
-            .accessibilityValue(energy >= 1 ? "可以使用" : "能量尚未充滿")
+            .disabled(!isReady)
+            .accessibilityLabel(Text(name))
+            .accessibilityValue(isReady ? "可以使用" : "傷害充能 \(Int(charge))，需要 \(requirement)")
         }
     }
 }

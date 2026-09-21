@@ -55,6 +55,22 @@ enum ShipID: String, Codable, CaseIterable, Identifiable {
         case .aegis: 1_000
         }
     }
+
+    var specialDamageRequirement: Int {
+        switch self {
+        case .nova: 500
+        case .tempest: 1_000
+        case .aegis: 700
+        }
+    }
+
+    var specialName: LocalizedStringResource {
+        switch self {
+        case .nova: "雷霆爆發"
+        case .tempest: "集束射擊"
+        case .aegis: "能量護盾"
+        }
+    }
 }
 
 struct WeaponConfiguration: Equatable {
