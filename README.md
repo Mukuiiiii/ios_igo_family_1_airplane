@@ -13,23 +13,9 @@
 
 ## GitHub Actions IPA 發布
 
-`.github/workflows/release-ipa.yml` 會在每次 commit push 後，以 iOS Distribution 簽署建置 IPA，並建立一個附帶 IPA 的 GitHub Release。也可以從 Actions 頁面手動執行。
+`.github/workflows/release-ipa.yml` 會在每次 commit push 後編譯 iOS 26 device app、封裝成 `igo3-unsigned.ipa`，並建立附帶 IPA 的 GitHub Release。也可以從 Actions 頁面手動執行，不需要設定憑證或 Repository secrets。
 
-先在 GitHub repository 的 Settings > Secrets and variables > Actions 建立以下 Repository secrets：
-
-- `APPLE_CERTIFICATE_BASE64`：Apple Distribution `.p12` 憑證的 Base64 內容。
-- `APPLE_CERTIFICATE_PASSWORD`：匯出 `.p12` 時設定的密碼。
-- `APPLE_PROVISIONING_PROFILE_BASE64`：與 `com.huangyimingpersonalteam.igo3` 相符的 `.mobileprovision` Base64 內容。
-- `APPLE_TEAM_ID`：Apple Developer Team ID。
-
-預設使用 Ad Hoc 匯出。若要改用 App Store Connect 發布格式，在 Actions Variables 新增 `EXPORT_METHOD` 並設為 `app-store-connect`；對應的 provisioning profile 也必須使用 App Store distribution profile。
-
-在 macOS 可使用以下命令產生 Base64 值，再將輸出完整貼入 Secret：
-
-```sh
-base64 -i DistributionCertificate.p12 | pbcopy
-base64 -i igo3.mobileprovision | pbcopy
-```
+產物是未簽名 IPA，不能直接安裝到一般 iPhone，也不能提交 App Store Connect；請先使用自己的憑證與 provisioning profile 重新簽名。
 
 ## 操作
 
