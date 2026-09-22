@@ -16,6 +16,26 @@ enum GameSoundEffect: Hashable {
     case pickup
     case interfaceTap
     case victory
+
+    var assetName: String {
+        switch self {
+        case .playerNovaShot: "player_nova_shot"
+        case .playerTempestShot: "player_tempest_shot"
+        case .playerAegisShot: "player_aegis_shot"
+        case .enemyShot: "enemy_shot"
+        case .bossBasic(let level): "boss_basic_\(level)"
+        case .bossSpecial(let level, let alternate):
+            alternate ? "boss_alternate_\(level)" : "boss_special_\(level)"
+        case .novaSkill: "skill_nova"
+        case .tempestSkill: "skill_tempest"
+        case .aegisSkill: "skill_aegis"
+        case .shieldBlock: "shield_block"
+        case .playerHit: "player_hit"
+        case .pickup: "pickup"
+        case .interfaceTap: "interface_tap"
+        case .victory: "victory"
+        }
+    }
 }
 
 @MainActor
@@ -107,7 +127,9 @@ final class GameAudioManager {
         guard volume > 0 else { return }
         startEngineIfNeeded()
 
-        let buffer = effectBuffers[effect] ?? makeEffectBuffer(effect)
+        let buffer = effectBuffers[effect]
+            ?? loadAudioBuffer(named: effect.assetName)
+            ?? makeEffectBuffer(effect)
         effectBuffers[effect] = buffer
         let player = availableEffectPlayer()
         player.volume = volume
@@ -122,7 +144,8 @@ final class GameAudioManager {
         startEngineIfNeeded()
         shieldPlayer.stop()
         shieldPlayer.volume = combatVolume * 0.55
-        shieldPlayer.scheduleBuffer(makeShieldLoop(), at: nil, options: .loops)
+        let buffer = loadAudioBuffer(named: "shield_loop") ?? makeShieldLoop()
+        shieldPlayer.scheduleBuffer(buffer, at: nil, options: .loops)
         if !isPaused {
             shieldPlayer.play()
         }
@@ -145,7 +168,9 @@ final class GameAudioManager {
         startEngineIfNeeded()
         musicPlayer.stop()
         musicPlayer.volume = backgroundVolume
-        musicPlayer.scheduleBuffer(makeMusicBuffer(level: level, boss: boss), at: nil, options: .loops)
+        let assetName = boss ? "boss_\(level)" : "level_\(level)"
+        let buffer = loadAudioBuffer(named: assetName) ?? makeMusicBuffer(level: level, boss: boss)
+        musicPlayer.scheduleBuffer(buffer, at: nil, options: .loops)
         if !isPaused, backgroundVolume > 0 {
             musicPlayer.play()
         }
@@ -183,6 +208,27 @@ final class GameAudioManager {
             .interface
         default:
             .combat
+        }
+    }
+
+    private func loadAudioBuffer(named name: String) -> AVAudioPCMBuffer? {
+        let url = Bundle.main.url(forResource: name, withExtension: "wav", subdirectory: "Audio")
+            ?? Bundle.main.url(forResource: name, withExtension: "wav")
+        guard let url,
+              let file = try? AVAudioFile(forReading: url),
+              file.length > 0,
+              let buffer = AVAudioPCMBuffer(
+                  pcmFormat: file.processingFormat,
+                  frameCapacity: AVAudioFrameCount(file.length)
+              ) else {
+            return nil
+        }
+
+        do {
+            try file.read(into: buffer)
+            return buffer
+        } catch {
+            return nil
         }
     }
 
