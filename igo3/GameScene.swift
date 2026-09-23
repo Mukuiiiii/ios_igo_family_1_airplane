@@ -90,10 +90,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         let displayScale = min(viewSize.width / size.width, viewSize.height / size.height)
         guard displayScale > 0 else { return }
-        let multiplier = CGFloat(sensitivity) / displayScale
-        let deltaX = (translation.width - previous.width) * multiplier
-        let deltaY = (translation.height - previous.height) * multiplier
+        let viewDeltaX = translation.width - previous.width
+        let viewDeltaY = translation.height - previous.height
+        let maximumContinuousDelta = max(36, min(viewSize.width, viewSize.height) * 0.18)
         previousDragTranslation = translation
+
+        // SwiftUI may transfer an active drag to another finger. Treat the resulting
+        // location discontinuity as a new drag baseline instead of teleporting the ship.
+        guard abs(viewDeltaX) <= maximumContinuousDelta,
+              abs(viewDeltaY) <= maximumContinuousDelta else { return }
+
+        let multiplier = CGFloat(sensitivity) / displayScale
+        let deltaX = viewDeltaX * multiplier
+        let deltaY = viewDeltaY * multiplier
 
         let lowerLimit = max(80, CGFloat(fingerOffset))
         let x = max(28, min(size.width - 28, player.position.x + deltaX))
@@ -1625,6 +1634,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     func testingApplyPlayerHit() {
         hitPlayer()
+    }
+
+    var testingPlayerPosition: CGPoint {
+        player.position
     }
 
     func testingAddEnemyProjectile() {

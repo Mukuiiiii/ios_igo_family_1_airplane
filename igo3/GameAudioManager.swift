@@ -59,7 +59,6 @@ final class GameAudioManager {
     private var backgroundVolume: Float = 0.65
     private var currentMusic: (level: Int, boss: Bool)?
     private var isPaused = false
-    private var engineStarted = false
 
     init() {
         format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
@@ -159,6 +158,7 @@ final class GameAudioManager {
         stopMusic()
         stopShieldLoop()
         effectPlayers.forEach { $0.stop() }
+        isPaused = false
     }
 
     private func playMusic(level: Int, boss: Bool) {
@@ -177,19 +177,14 @@ final class GameAudioManager {
     }
 
     private func startEngineIfNeeded() {
-        guard !engineStarted else { return }
+        guard !engine.isRunning else { return }
         #if os(iOS)
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
         try? session.setActive(true)
         #endif
         engine.prepare()
-        do {
-            try engine.start()
-            engineStarted = true
-        } catch {
-            engineStarted = false
-        }
+        try? engine.start()
     }
 
     private func availableEffectPlayer() -> AVAudioPlayerNode {

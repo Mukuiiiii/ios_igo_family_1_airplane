@@ -17,6 +17,7 @@ struct ContentView: View {
                 LevelSelectView(model: model)
             case .game:
                 GameContainerView(model: model)
+                    .id(model.session?.id)
             case .settings:
                 SettingsView(model: model)
             }
@@ -582,6 +583,10 @@ struct GameContainerView: View {
                                     scene.endPlayerDrag()
                                 }
                         )
+                        .simultaneousGesture(
+                            TapGesture(count: 2)
+                                .onEnded(scene.activateSpecial)
+                        )
 
                     VStack {
                         BattleHUD(session: session, pauseAction: scene.togglePause)
@@ -622,6 +627,7 @@ struct GameContainerView: View {
                     scene.togglePause()
                 }
             }
+            .id(session.id)
         }
     }
 }

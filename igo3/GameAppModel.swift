@@ -63,6 +63,11 @@ final class GameAppModel {
         guard level <= progress.highestUnlockedLevel,
               let definition = LevelDefinition.all.first(where: { $0.id == level }) else { return }
 
+        if let activeScene {
+            activeScene.isPaused = true
+            audioManager.stopAll()
+        }
+
         selectedLevel = level
         let upgrade = progress.upgrades[progress.selectedShip, default: 1]
         let battle = GameSession()

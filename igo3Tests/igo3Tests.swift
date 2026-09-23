@@ -33,6 +33,37 @@ struct GameFlowTests {
         #expect(model.progress.coins == initialCoins + 25 + 20)
     }
 
+    @Test func `Retry replaces and pauses the finished scene`() {
+        let model = GameAppModel(store: makeStore(), saveKey: "progress")
+        model.start(level: 1)
+        let finishedScene = model.activeScene!
+        let finishedSession = model.session!
+        _ = finishedSession.finalize(victory: false, level: 1)
+        _ = model.settleCurrentBattle()
+
+        model.start(level: 1)
+
+        #expect(finishedScene.isPaused)
+        #expect(model.activeScene !== finishedScene)
+        #expect(model.session?.id != finishedSession.id)
+        #expect(model.session?.state == .playing)
+    }
+
+    @Test func `Next level replaces the finished battle`() {
+        let model = GameAppModel(store: makeStore(), saveKey: "progress")
+        model.start(level: 1)
+        let finishedSession = model.session!
+        _ = finishedSession.finalize(victory: true, level: 1)
+        _ = model.settleCurrentBattle()
+
+        model.startNextLevel()
+
+        #expect(model.selectedLevel == 2)
+        #expect(model.session?.id != finishedSession.id)
+        #expect(model.session?.state == .playing)
+        #expect(model.activeScene != nil)
+    }
+
     @Test func `A battle cannot award twice`() {
         let model = GameAppModel(store: makeStore(), saveKey: "progress")
         model.start(level: 1)
@@ -84,6 +115,56 @@ struct GameFlowTests {
         #expect(session.health == 4)
         #expect(session.outcome == outcome)
         #expect(session.state == .defeat)
+    }
+
+    @Test func `A discontinuous drag does not teleport the player`() {
+        let session = GameSession()
+        let scene = GameScene(
+            size: CGSize(width: 390, height: 844),
+            level: LevelDefinition.all[0],
+            ship: .nova,
+            upgradeLevel: 1,
+            session: session
+        )
+        let viewSize = CGSize(width: 390, height: 844)
+
+        scene.movePlayer(
+            relativeViewTranslation: .zero,
+            viewSize: viewSize,
+            sensitivity: 1,
+            fingerOffset: 80
+        )
+        scene.movePlayer(
+            relativeViewTranslation: CGSize(width: 12, height: 8),
+            viewSize: viewSize,
+            sensitivity: 1,
+            fingerOffset: 80
+        )
+        let positionBeforeFingerChange = scene.testingPlayerPosition
+        scene.movePlayer(
+            relativeViewTranslation: CGSize(width: 280, height: -250),
+            viewSize: viewSize,
+            sensitivity: 1,
+            fingerOffset: 80
+        )
+
+        #expect(scene.testingPlayerPosition == positionBeforeFingerChange)
+    }
+
+    @Test func `Special activation remains available to gestures`() {
+        let session = GameSession()
+        let scene = GameScene(
+            size: CGSize(width: 390, height: 844),
+            level: LevelDefinition.all[0],
+            ship: .nova,
+            upgradeLevel: 1,
+            session: session
+        )
+        session.energy = Double(ShipID.nova.specialDamageRequirement)
+
+        scene.activateSpecial()
+
+        #expect(session.energy == 0)
     }
 
     @Test func `Shared projectile clearing removes every enemy shot`() {
